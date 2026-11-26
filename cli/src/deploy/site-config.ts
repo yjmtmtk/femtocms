@@ -44,17 +44,23 @@ export function siteConfigPath(workerName: string, dir: string = sitesDir()): st
 
 /**
  * Writes `<dir>/<workerName>/wrangler.jsonc` (plain JSON, which wrangler accepts as JSONC) and returns its path.
+ * `account_id` is written because a config's account_id beats CLOUDFLARE_ACCOUNT_ID: every wrangler call passes
+ * this file via --config (and runs in its directory), so a wrangler config in the user's cwd can never redirect us.
+ * Before the D1 database exists (`d1Id` empty) the config has no d1_databases yet; it is rewritten once the id is known.
  * `no_bundle` because dist/worker/index.js is already bundled, with embed.client.js inlined as a string.
  */
 export function writeSiteConfig(site: NonNullable<Profile["site"]>, dir: string = sitesDir()): string {
   const { main, migrationsDir } = bundledPaths();
   const config: Record<string, unknown> = {
     name: site.workerName,
+    account_id: site.accountId,
     main,
     no_bundle: true,
     compatibility_date: COMPATIBILITY_DATE,
     compatibility_flags: COMPATIBILITY_FLAGS,
-    d1_databases: [{ binding: "DB", database_name: site.d1Name, database_id: site.d1Id, migrations_dir: migrationsDir }],
+    ...(site.d1Id
+      ? { d1_databases: [{ binding: "DB", database_name: site.d1Name, database_id: site.d1Id, migrations_dir: migrationsDir }] }
+      : {}),
     r2_buckets: [{ binding: "MEDIA", bucket_name: site.bucket }],
     vars: { SITE_NAME: site.workerName },
   };

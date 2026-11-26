@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { loadConfig, saveConfig, type Profile } from "../src/config";
 import { buildProgram } from "../src/index";
 import { runDestroy, runInit, runUpgrade, type Prompter } from "../src/commands/deploy";
-import { COMPATIBILITY_DATE, COMPATIBILITY_FLAGS, packageRoot, writeSiteConfig } from "../src/deploy/site-config";
+import { COMPATIBILITY_DATE, COMPATIBILITY_FLAGS, packageRoot, siteConfigPath, writeSiteConfig } from "../src/deploy/site-config";
 import {
   defaultRunner, findWorkersDevUrl, parseBucketNames, parseDatabaseId, type RunResult, type WranglerRunner,
 } from "../src/deploy/wrangler";
@@ -14,14 +14,28 @@ const ok = (stdout = ""): RunResult => ({ code: 0, stdout, stderr: "" });
 const bad = (stderr: string, code = 1): RunResult => ({ code, stdout: "", stderr });
 
 type Reply = RunResult | RunResult[];
-interface Call { args: string[]; interactive?: boolean; env?: Record<string, string> }
+interface Call {
+  args: string[]; interactive?: boolean; env?: Record<string, string>; cwd?: string;
+  /** The --config file as it was when the call was made (undefined if the call had no --config or the file was missing). */
+  configAtCall?: Record<string, unknown>;
+}
+
+function readConfigAt(args: string[]): Record<string, unknown> | undefined {
+  const i = args.indexOf("--config");
+  if (i === -1) return undefined;
+  try {
+    return JSON.parse(readFileSync(args[i + 1]!, "utf8"));
+  } catch {
+    return undefined;
+  }
+}
 
 /** Replies are chosen by the longest key that prefixes the space-joined args. An array is consumed one reply per call (the last one repeats). */
 function fakeRunner(replies: Record<string, Reply>) {
   const calls: Call[] = [];
   const used = new Map<string, number>();
   const run: WranglerRunner = async (args, opts) => {
-    calls.push({ args, interactive: opts?.interactive, env: opts?.env });
+    calls.push({ args, interactive: opts?.interactive, env: opts?.env, cwd: opts?.cwd, configAtCall: readConfigAt(args) });
     const joined = args.join(" ");
     const key = Object.keys(replies).filter((k) => joined.startsWith(k)).sort((a, b) => b.length - a.length)[0];
     if (key === undefined) throw new Error(`unexpected wrangler call: ${joined}`);
@@ -82,11 +96,15 @@ function seedProfile(profile: Partial<Profile> = {}, name = "femtocms") {
 }
 
 /** A fetch that answers GET /api/keys with the given status and records every call. */
-function fakeFetch(status = 200) {
+function fakeFetch(status = 200, kind: "femtocms" | "host" | "network" = "femtocms") {
   const calls: { method: string; url: string }[] = [];
   const fn = (async (input: URL | string, init?: RequestInit) => {
     calls.push({ method: init?.method ?? "GET", url: String(input) });
-    return status === 200 ? Response.json({ items: [] }) : Response.json({ error: { code: "unauthorized", message: "no" } }, { status });
+    if (kind === "network") throw new TypeError("fetch failed");
+    if (status === 200) return Response.json({ items: [] });
+    // "host": the platform's own page (a deleted Worker's workers.dev URL), not a femtocms JSON error
+    if (kind === "host") return new Response("There is nothing here yet.", { status, headers: { "content-type": "text/html" } });
+    return Response.json({ error: { code: "unauthorized", message: "no" } }, { status });
   }) as unknown as typeof fetch;
   return { fn, calls };
 }
@@ -178,7 +196,7 @@ describe("runInit", () => {
     await runInit({ name: "femtocms", runner: r.run, prompt: p.prompt, log: (s) => logs.push(s) });
     expect(logs.join("\n")).toContain("https://dash.cloudflare.com/acc1/r2/overview");
     expect(p.log.enters).toHaveLength(1);
-    expect(r.calls.filter((c) => c.args.join(" ") === "r2 bucket list")).toHaveLength(2);
+    expect(r.calls.filter((c) => c.args.slice(0, 3).join(" ") === "r2 bucket list")).toHaveLength(2);
   });
 
   it("R2 未有効の判定はエラーコード 10042 だけでも働き、他のエラーはそのまま失敗にする", async () => {
@@ -294,7 +312,7 @@ describe("runDestroy", () => {
     expect(loadConfig().profiles.femtocms).toBeDefined();
   });
 
-  it("一致したら API で空にしてから Worker・D1・R2 を削除し、プロファイルを消す", async () => {
+  it("一致したら API で空にしてから R2・Worker・D1 の順に削除し、プロファイルと生成した設定を消す", async () => {
     seedProfile();
     const r = fakeRunner(destroyReplies);
     const f = fakeFetch();
@@ -304,32 +322,109 @@ describe("runDestroy", () => {
       { method: "POST", url: "https://femtocms.me.workers.dev/api/reset" },
       { method: "DELETE", url: "https://femtocms.me.workers.dev/api/trash?confirm=femtocms" },
     ]);
+    const cfg = siteConfigPath("femtocms");
     expect(r.calls.map((c) => c.args.join(" "))).toEqual([
-      "delete --name femtocms --force",
-      "d1 delete femtocms-femtocms -y",
-      "r2 bucket delete femtocms-femtocms",
+      `r2 bucket delete femtocms-femtocms --config ${cfg}`,
+      `delete --name femtocms --force --config ${cfg}`,
+      `d1 delete femtocms-femtocms -y --config ${cfg}`,
     ]);
     expect(r.calls.every((c) => c.env?.CLOUDFLARE_ACCOUNT_ID === "acc1")).toBe(true);
     expect(loadConfig()).toEqual({ profiles: {} });
+    expect(existsSync(cfg)).toBe(false);
   });
 
-  it("API が答えなくても（Worker が既に無い等）続行し、既に無いリソースは成功として扱う", async () => {
+  it("サイトを空にする API が HTTP エラー（401/403/5xx/JSON エラー）なら、何も削除せずに止まる", async () => {
+    for (const status of [401, 403, 500, 503]) {
+      seedProfile();
+      const r = fakeRunner(destroyReplies);
+      await expect(
+        runDestroy({ profile: "femtocms", runner: r.run, prompt: fakePrompt({ texts: ["femtocms"] }).prompt, log: () => {}, fetch: fakeFetch(status).fn }),
+      ).rejects.toThrow(new RegExp(`HTTP ${status}.*何も削除していません.*femtocms login`, "s"));
+      expect(r.calls).toHaveLength(0);
+      expect(loadConfig().profiles.femtocms).toBeDefined();
+    }
+  });
+
+  it("ホスト自身の 404（削除済みの Worker）や接続失敗なら、Worker が無いものとして続行する", async () => {
+    for (const f of [fakeFetch(404, "host"), fakeFetch(200, "network")]) {
+      seedProfile();
+      const r = fakeRunner(destroyReplies);
+      const logs: string[] = [];
+      const done = await runDestroy({ profile: "femtocms", runner: r.run, prompt: fakePrompt({ texts: ["femtocms"] }).prompt, log: (s) => logs.push(s), fetch: f.fn });
+      expect(done).toBe(true);
+      expect(r.calls).toHaveLength(3);
+      expect(logs.join("\n")).toContain("既に無い");
+      expect(loadConfig().profiles).toEqual({});
+    }
+  });
+
+  it("既に無いリソースは、そのリソース固有の wrangler の答えのときだけ成功として扱う", async () => {
     seedProfile();
-    const r = fakeRunner({ ...destroyReplies, "d1 delete": bad("✘ [ERROR] Database not found [code: 7404]") });
-    const f = fakeFetch(404);
-    const logs: string[] = [];
-    const done = await runDestroy({ profile: "femtocms", runner: r.run, prompt: fakePrompt({ texts: ["femtocms"] }).prompt, log: (s) => logs.push(s), fetch: f.fn });
+    const r = fakeRunner({
+      "r2 bucket delete": bad("✘ [ERROR] The specified bucket does not exist. [code: 10006]"),
+      delete: bad("✘ [ERROR] This Worker does not exist on your account. [code: 10007]"),
+      "d1 delete": bad("✘ [ERROR] Couldn't find a D1 DB with name or binding 'femtocms-femtocms' in your config or the API."),
+    });
+    const done = await runDestroy({ profile: "femtocms", runner: r.run, prompt: fakePrompt({ texts: ["femtocms"] }).prompt, log: () => {}, fetch: fakeFetch().fn });
     expect(done).toBe(true);
-    expect(loadConfig().profiles).toEqual({});
+    expect(r.calls).toHaveLength(3);
   });
 
-  it("本物の失敗では止まり、プロファイルを残す", async () => {
+  it("汎用の not found（別アカウントかもしれない）は成功扱いにせず、止まってプロファイルを残す", async () => {
+    seedProfile();
+    const r = fakeRunner({ ...destroyReplies, "r2 bucket delete": bad("✘ [ERROR] Not found") });
+    await expect(
+      runDestroy({ profile: "femtocms", runner: r.run, prompt: fakePrompt({ texts: ["femtocms"] }).prompt, log: () => {}, fetch: fakeFetch().fn }),
+    ).rejects.toThrow(/Not found/);
+    expect(loadConfig().profiles.femtocms).toBeDefined();
+  });
+
+  it("R2 の削除に失敗（空でない）したら Worker と D1 は削除せず、プロファイルを残す", async () => {
     seedProfile();
     const r = fakeRunner({ ...destroyReplies, "r2 bucket delete": bad("The bucket you tried to delete is not empty [code: 10008]") });
     await expect(
       runDestroy({ profile: "femtocms", runner: r.run, prompt: fakePrompt({ texts: ["femtocms"] }).prompt, log: () => {}, fetch: fakeFetch().fn }),
     ).rejects.toThrow(/not empty/);
+    expect(r.names()).toEqual(["r2 bucket"]);
     expect(loadConfig().profiles.femtocms).toBeDefined();
+  });
+});
+
+describe("アカウントの固定（ユーザー自身の wrangler 設定に引きずられない）", () => {
+  /** Every call except whoami/login must name our generated config and run in its directory. */
+  function expectPinned(calls: Call[]) {
+    const cfg = siteConfigPath("femtocms");
+    const pinned = calls.filter((c) => c.args[0] !== "whoami" && c.args[0] !== "login");
+    expect(pinned.length).toBeGreaterThan(0);
+    for (const c of pinned) {
+      expect(c.args.slice(-2), c.args.join(" ")).toEqual(["--config", cfg]);
+      expect(c.cwd, c.args.join(" ")).toBe(join(tmp, "femtocms", "sites", "femtocms"));
+    }
+  }
+
+  it("init: D1/R2 の最初の呼び出しの時点で account_id 入りの設定があり、全ての呼び出しがそれを --config と cwd で使う", async () => {
+    const r = fakeRunner(happy());
+    await runInit({ name: "femtocms", runner: r.run, prompt: fakePrompt().prompt, log: () => {} });
+    expectPinned(r.calls);
+    const first = r.calls.find((c) => c.args[0] === "d1" && c.args[1] === "list")!;
+    expect(first.configAtCall).toMatchObject({ account_id: "acc1", name: "femtocms" });
+    for (const c of r.calls.filter((c) => c.args[0] !== "whoami")) expect(c.configAtCall?.account_id).toBe("acc1");
+    // after d1 create the id is written into the config before deploy
+    const deployCall = r.calls.find((c) => c.args[0] === "deploy")!;
+    expect((deployCall.configAtCall!.d1_databases as { database_id: string }[])[0]!.database_id).toBe("db-123");
+  });
+
+  it("upgrade と destroy も同様", async () => {
+    seedProfile();
+    const up = fakeRunner({ deploy: ok("https://femtocms.me.workers.dev"), "d1 migrations": ok() });
+    await runUpgrade({ profile: "femtocms", runner: up.run, log: () => {} });
+    expectPinned(up.calls);
+
+    const d = fakeRunner({ delete: ok(), "d1 delete": ok(), "r2 bucket delete": ok() });
+    // the config is removed at the end, so check while it is used
+    await runDestroy({ profile: "femtocms", runner: d.run, prompt: fakePrompt({ texts: ["femtocms"] }).prompt, log: () => {}, fetch: fakeFetch().fn });
+    expectPinned(d.calls);
+    for (const c of d.calls) expect(c.configAtCall?.account_id).toBe("acc1");
   });
 });
 
@@ -340,6 +435,7 @@ describe("writeSiteConfig", () => {
     const cfg = JSON.parse(readFileSync(path, "utf8")); // no comments, so plain JSON.parse works
     expect(cfg).toEqual({
       name: "femtocms",
+      account_id: "acc1",
       main: join(packageRoot(), "dist", "worker", "index.js"),
       no_bundle: true,
       compatibility_date: COMPATIBILITY_DATE,
@@ -349,6 +445,12 @@ describe("writeSiteConfig", () => {
       vars: { SITE_NAME: "femtocms" },
     });
     expect(existsSync(cfg.d1_databases[0].migrations_dir)).toBe(true);
+  });
+
+  it("D1 の ID がまだ無いときは d1_databases を入れない", () => {
+    const cfg = JSON.parse(readFileSync(writeSiteConfig({ ...SITE, d1Id: "" }, tmp), "utf8"));
+    expect(cfg.d1_databases).toBeUndefined();
+    expect(cfg.account_id).toBe("acc1");
   });
 
   it("domain があれば custom domain の routes を入れる", () => {

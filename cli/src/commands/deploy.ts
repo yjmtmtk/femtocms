@@ -59,9 +59,18 @@ export const clackPrompter: Prompter = {
 
 const failure = (what: string, r: RunResult) => new Error(`${what}に失敗しました（wrangler の終了コード ${r.code}）\n${outputTail(r)}`);
 
-/** Every call after account selection carries the account in the environment, so nothing ever hits the wrong one. */
-function bindAccount(runner: WranglerRunner, accountId: string): WranglerRunner {
-  return (args, opts) => runner(args, { ...opts, env: { ...opts?.env, CLOUDFLARE_ACCOUNT_ID: accountId } });
+/**
+ * Every account-touching call is pinned to the chosen account three ways: the account in the environment, our generated
+ * config (which carries account_id) via --config, and that config's directory as cwd. Wrangler otherwise walks up from the
+ * cwd to the user's own config, whose account_id would win over the environment.
+ */
+function bindSite(runner: WranglerRunner, accountId: string, configPath: string): WranglerRunner {
+  return (args, opts) =>
+    runner([...args, "--config", configPath], {
+      ...opts,
+      cwd: dirname(configPath),
+      env: { ...opts?.env, CLOUDFLARE_ACCOUNT_ID: accountId },
+    });
 }
 
 function checkName(name: string): void {
@@ -137,8 +146,8 @@ async function ensureBucket(run: WranglerRunner, bucket: string, accountId: stri
 }
 
 /** Deploys and returns the site URL. A brand-new account has no workers.dev subdomain: wrangler must ask the user, so that one step runs interactively. */
-async function deploy(run: WranglerRunner, configPath: string, site: Site, log: (s: string) => void): Promise<string> {
-  const args = ["deploy", "--config", configPath];
+async function deploy(run: WranglerRunner, site: Site, log: (s: string) => void): Promise<string> {
+  const args = ["deploy"];
   let r = await run(args);
   if (r.code !== 0 && /workers\.dev subdomain/i.test(`${r.stdout}\n${r.stderr}`)) {
     log("このアカウントにはまだ workers.dev のサブドメインがありません。画面の案内に従って登録してください。");
@@ -153,8 +162,8 @@ async function deploy(run: WranglerRunner, configPath: string, site: Site, log: 
   return url;
 }
 
-async function migrate(run: WranglerRunner, configPath: string, d1Name: string): Promise<void> {
-  const r = await run(["d1", "migrations", "apply", d1Name, "--remote", "--config", configPath]);
+async function migrate(run: WranglerRunner, d1Name: string): Promise<void> {
+  const r = await run(["d1", "migrations", "apply", d1Name, "--remote"]);
   if (r.code !== 0) throw failure("マイグレーションの適用", r);
 }
 
@@ -211,19 +220,23 @@ export async function runInit(opts: InitOpts): Promise<{ url: string; key: strin
   if (opts.domain) checkDomain(opts.domain);
 
   const accountId = await pickAccount(opts.runner, prompt, log);
-  const run = bindAccount(opts.runner, accountId);
   const d1Name = `femtocms-${name}`;
   const bucket = `femtocms-${name}`;
+
+  // The config exists before the first D1/R2 call (it pins the account); the database id is filled in once known.
+  const draft: Site = { workerName: name, d1Name, d1Id: "", bucket, accountId, ...(opts.domain ? { domain: opts.domain } : {}) };
+  const configPath = writeSiteConfig(draft);
+  const run = bindSite(opts.runner, accountId, configPath);
 
   const d1Id = await ensureDatabase(run, d1Name, log);
   await ensureBucket(run, bucket, accountId, prompt, log);
 
-  const site: Site = { workerName: name, d1Name, d1Id, bucket, accountId, ...(opts.domain ? { domain: opts.domain } : {}) };
-  const configPath = writeSiteConfig(site);
+  const site: Site = { ...draft, d1Id };
+  writeSiteConfig(site);
   log("Worker をデプロイします（少し時間がかかります）");
-  const url = await deploy(run, configPath, site, log);
+  const url = await deploy(run, site, log);
   log("データベースのマイグレーションを適用します");
-  await migrate(run, configPath, d1Name);
+  await migrate(run, d1Name);
 
   let key: string;
   let keyIsNew = false;
@@ -235,7 +248,7 @@ export async function runInit(opts: InitOpts): Promise<{ url: string; key: strin
     key = generateKey("admin");
     const sql = await bootstrapSql(key, "init", new Date().toISOString());
     // `--command` takes the SQL as one argument: no shell is involved, so quotes and `$` survive.
-    const r = await run(["d1", "execute", d1Name, "--remote", "--yes", "--command", sql, "--config", configPath]);
+    const r = await run(["d1", "execute", d1Name, "--remote", "--yes", "--command", sql]);
     if (r.code !== 0) throw failure("管理キーの登録", r);
     keyIsNew = true;
   }
@@ -262,20 +275,52 @@ function siteOf(profile: string): { profile: Profile; site: Site } {
 
 export async function runUpgrade(opts: { profile: string; runner: WranglerRunner; log: (s: string) => void }): Promise<{ url: string }> {
   const { profile, site } = siteOf(opts.profile);
-  const run = bindAccount(opts.runner, site.accountId);
-  const configPath = writeSiteConfig(site);
+  const run = bindSite(opts.runner, site.accountId, writeSiteConfig(site));
   opts.log("Worker を更新します（少し時間がかかります）");
-  await deploy(run, configPath, site, opts.log);
+  await deploy(run, site, opts.log);
   opts.log("データベースのマイグレーションを適用します");
-  await migrate(run, configPath, site.d1Name);
+  await migrate(run, site.d1Name);
   opts.log(`更新しました: ${profile.url}`);
   return { url: profile.url };
 }
 
 // --- destroy -----------------------------------------------------------------------------------
 
-/** wrangler's way of saying the thing is already gone: not an error when tearing down. */
-const ALREADY_GONE_RE = /\b(?:7404|10006|10007|10090)\b|not found|does not exist/i;
+/**
+ * wrangler's resource-specific "this does not exist" answers (message or API error code), per resource.
+ * Deliberately narrow: a bare "not found" could just as well be the wrong account, which must never count as success.
+ */
+const ALREADY_GONE: Record<"worker" | "d1" | "r2", RegExp> = {
+  worker: /\[code: 10007\]|This Worker does not exist/i,
+  d1: /\[code: 7404\]|Couldn't find a D1 DB/i,
+  r2: /\[code: 10006\]|The specified bucket does not exist/i,
+};
+
+/**
+ * Empties the site through its API so the R2 bucket can be deleted. Returns normally when done or when the site is
+ * clearly absent: the connection fails (no such host, refused, timeout) or the host itself answers 404 with a non-femtocms
+ * body (a deleted Worker's workers.dev URL). Any other HTTP answer (401/403 for a revoked key, 5xx, a JSON error from the
+ * site) means the Worker may be alive with data in R2, so it throws and nothing has been deleted yet.
+ */
+async function emptySite(client: FemtoClient, siteName: string, log: (s: string) => void): Promise<void> {
+  try {
+    await client.request("POST", "/api/reset", { json: { confirm: siteName } });
+    await client.request("DELETE", "/api/trash", { query: { confirm: siteName } });
+  } catch (e) {
+    if (!(e instanceof ApiError)) {
+      log(`サイトに接続できませんでした（${(e as Error).message}）。Worker が既に無いものとして続けます`);
+      return;
+    }
+    if (e.status === 404 && e.code.startsWith("http_")) {
+      log("サイトの URL が 404 を返しました。Worker が既に無いものとして続けます");
+      return;
+    }
+    throw new Error(
+      `サイトを空にできませんでした（HTTP ${e.status}: ${e.message}）。R2 にデータが残ったまま削除すると後から消せなくなるため、何も削除していません。` +
+        "femtocms login で有効な管理キーを保存し直してから、もう一度 destroy を実行してください",
+    );
+  }
+}
 
 export async function runDestroy(opts: {
   profile: string; runner: WranglerRunner; prompt: Prompter; log: (s: string) => void; fetch?: typeof fetch;
@@ -292,25 +337,20 @@ export async function runDestroy(opts: {
 
   // R2 buckets must be empty to be deleted: reset moves everything to the trash, emptying the trash deletes the media objects.
   log("データを空にします");
-  try {
-    const client = new FemtoClient(profile, opts.fetch);
-    await client.request("POST", "/api/reset", { json: { confirm: site.workerName } });
-    await client.request("DELETE", "/api/trash", { query: { confirm: site.workerName } });
-  } catch (e) {
-    log(`データを空にできませんでした（${(e as Error).message}）。Worker が既に無い場合はこのまま続けます`);
-  }
+  await emptySite(new FemtoClient(profile, opts.fetch), site.workerName, log);
 
-  const run = bindAccount(opts.runner, site.accountId);
-  const steps: [string, string[]][] = [
-    ["Worker", ["delete", "--name", site.workerName, "--force"]],
-    ["D1 データベース", ["d1", "delete", site.d1Name, "-y"]],
-    ["R2 バケット", ["r2", "bucket", "delete", site.bucket]],
+  const run = bindSite(opts.runner, site.accountId, writeSiteConfig(site));
+  // R2 first: it is the step that can fail on leftover data, and while the Worker still exists a retry can empty it again.
+  const steps: [string, keyof typeof ALREADY_GONE, string[]][] = [
+    ["R2 バケット", "r2", ["r2", "bucket", "delete", site.bucket]],
+    ["Worker", "worker", ["delete", "--name", site.workerName, "--force"]],
+    ["D1 データベース", "d1", ["d1", "delete", site.d1Name, "-y"]],
   ];
-  for (const [label, args] of steps) {
+  for (const [label, kind, args] of steps) {
     log(`${label}を削除します`);
     const r = await run(args);
     if (r.code === 0) continue;
-    if (ALREADY_GONE_RE.test(`${r.stdout}\n${r.stderr}`)) {
+    if (ALREADY_GONE[kind].test(`${r.stdout}\n${r.stderr}`)) {
       log(`  ${label}は既にありませんでした`);
       continue;
     }

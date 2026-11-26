@@ -212,3 +212,128 @@ it("ベース URL が決まらなければ警告だけ出して何もしない",
   expect(fetchMock).not.toHaveBeenCalled();
   expect(warn).toHaveBeenCalled();
 });
+
+// ---- 詳細表示: [data-femtocms-entry] ----
+
+function setPageUrl(url: string): void {
+  if (win.happyDOM?.setURL) win.happyDOM.setURL(url);
+  else win.history.replaceState({}, "", url);
+}
+function mockEntry(body: unknown, status = 200) {
+  const fn = vi.fn(async () => Response.json(body, { status }));
+  globalThis.fetch = fn as unknown as typeof fetch;
+  return fn;
+}
+const detail = entry({
+  slug: "winter-latte",
+  data: { title: "<i>冬</i>のラテ", body: "**md**", cover: { url: "https://cms.test/media/m_x/a.png", alt: "ラテ" } },
+  html: { body: "<p><strong>md</strong></p>" },
+});
+
+it("詳細: URL の ?slug= の記事を取得し、タイトル・日付・本文 HTML を article に描画する", async () => {
+  setPageUrl("https://lp.test/news.html?slug=winter-latte");
+  document.body.innerHTML = `<div data-femtocms-entry="news"></div>`;
+  const fetchMock = mockEntry(detail);
+  load();
+  await win.femtocms.refresh();
+  expect(fetchMock).toHaveBeenCalledWith("https://cms.test/api/news/winter-latte", { credentials: "omit" });
+  const article = document.querySelector("article.fcms-entry")!;
+  expect(article).not.toBeNull();
+  const h1 = article.querySelector("h1.fcms-title")!;
+  expect(h1.textContent).toBe("<i>冬</i>のラテ");
+  expect(h1.innerHTML).not.toContain("<i>");
+  expect(article.querySelector("time.fcms-date")!.getAttribute("datetime")).toBe("2026-11-26T00:00:00.000Z");
+  const body = article.querySelector(".fcms-body.fcms-field-body")!;
+  expect(body.innerHTML).toBe("<p><strong>md</strong></p>");
+  // 既定では画像などは出さない
+  expect(article.querySelector("img")).toBeNull();
+});
+
+it("詳細: data-slug が URL より優先され、slug は URL エンコードされる", async () => {
+  setPageUrl("https://lp.test/news.html?slug=ignored");
+  document.body.innerHTML = `<div data-femtocms-entry="news" data-slug="a b/c"></div>`;
+  const fetchMock = mockEntry(detail);
+  load();
+  await win.femtocms.refresh();
+  expect(fetchMock).toHaveBeenCalledWith("https://cms.test/api/news/a%20b%2Fc", { credentials: "omit" });
+});
+
+it("詳細: data-param で URL パラメータ名を変えられる", async () => {
+  setPageUrl("https://lp.test/news.html?id=e_abc123def456");
+  document.body.innerHTML = `<div data-femtocms-entry="news" data-param="id"></div>`;
+  const fetchMock = mockEntry(detail);
+  load();
+  await win.femtocms.refresh();
+  expect(fetchMock).toHaveBeenCalledWith("https://cms.test/api/news/e_abc123def456", { credentials: "omit" });
+});
+
+it("詳細: ページ URL の preview トークンを API に渡す（下書きを LP のデザインで確認できる）", async () => {
+  setPageUrl("https://lp.test/news.html?slug=winter-latte&preview=tok.en");
+  document.body.innerHTML = `<div data-femtocms-entry="news"></div>`;
+  const fetchMock = mockEntry(detail);
+  load();
+  await win.femtocms.refresh();
+  expect(fetchMock).toHaveBeenCalledWith("https://cms.test/api/news/winter-latte?preview=tok.en", { credentials: "omit" });
+});
+
+it("詳細: data-fields と data-heading で項目と見出しの要素を変えられる。画像は明示時のみ http(s)", async () => {
+  setPageUrl("https://lp.test/news.html?slug=winter-latte");
+  document.body.innerHTML = `<div data-femtocms-entry="news" data-fields="cover,title" data-heading="h2"></div>`;
+  mockEntry(detail);
+  load();
+  await win.femtocms.refresh();
+  const article = document.querySelector("article.fcms-entry")!;
+  expect(article.children[0].tagName).toBe("IMG");
+  expect(article.children[0].getAttribute("alt")).toBe("ラテ");
+  expect(article.querySelector("h2.fcms-title")!.textContent).toBe("<i>冬</i>のラテ");
+  expect(article.querySelector(".fcms-body")).toBeNull();
+});
+
+it("詳細: data-heading に見出し以外を指定されたら h1 にする", async () => {
+  setPageUrl("https://lp.test/news.html?slug=winter-latte");
+  document.body.innerHTML = `<div data-femtocms-entry="news" data-heading="script"></div>`;
+  mockEntry(detail);
+  load();
+  await win.femtocms.refresh();
+  expect(document.querySelector("script.fcms-title")).toBeNull();
+  expect(document.querySelector("h1.fcms-title")).not.toBeNull();
+});
+
+it("詳細: 404 や slug 未指定では data-empty を出し、例外を投げない", async () => {
+  setPageUrl("https://lp.test/news.html?slug=nope");
+  document.body.innerHTML = `
+    <div id="a" data-femtocms-entry="news" data-empty="記事が見つかりません"></div>`;
+  mockEntry({ error: { code: "not_found", message: "x" } }, 404);
+  vi.spyOn(console, "warn").mockImplementation(() => {});
+  load();
+  await win.femtocms.refresh();
+  expect(document.querySelector("#a .fcms-empty")!.textContent).toBe("記事が見つかりません");
+
+  setPageUrl("https://lp.test/news.html");
+  document.body.innerHTML = `<div id="b" data-femtocms-entry="news" data-empty="記事が見つかりません"></div>`;
+  const fetchMock = mockEntry(detail);
+  await win.femtocms.refresh();
+  expect(fetchMock).not.toHaveBeenCalled();
+  expect(document.querySelector("#b .fcms-empty")!.textContent).toBe("記事が見つかりません");
+});
+
+it("詳細: data-document-title を付けるとページのタイトルを記事タイトルにする", async () => {
+  setPageUrl("https://lp.test/news.html?slug=winter-latte");
+  document.title = "Café";
+  document.body.innerHTML = `<div data-femtocms-entry="news" data-document-title></div>`;
+  mockEntry(detail);
+  load();
+  await win.femtocms.refresh();
+  expect(document.title).toBe("<i>冬</i>のラテ | Café");
+});
+
+it("一覧と詳細が同じページにあっても両方描画する", async () => {
+  setPageUrl("https://lp.test/news.html?slug=winter-latte");
+  document.body.innerHTML = `<div data-femtocms="news"></div><div data-femtocms-entry="news"></div>`;
+  globalThis.fetch = vi.fn(async (url: string) =>
+    Response.json(String(url).includes("/api/news/") ? detail : { items: [entry()], total: 1 })) as unknown as typeof fetch;
+  load();
+  await win.femtocms.refresh();
+  expect(document.querySelector("ul.fcms-list")).not.toBeNull();
+  expect(document.querySelector("article.fcms-entry")).not.toBeNull();
+});

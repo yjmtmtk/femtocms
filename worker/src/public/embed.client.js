@@ -1,4 +1,4 @@
-/* femtocms embed: renders a news list into every [data-femtocms] element. No dependencies. */
+/* femtocms embed: renders a list into every [data-femtocms] element and one entry into every [data-femtocms-entry] element. No dependencies. */
 (function () {
   "use strict";
   if (window.femtocms) return;
@@ -13,7 +13,10 @@
     ":where(.fcms-link:hover .fcms-title){text-decoration:underline}",
     ":where(.fcms-date){opacity:.7;font-size:.9em}",
     ":where(.fcms-image){display:block;max-width:100%;height:auto}",
+    ":where(.fcms-entry) :where(.fcms-title){margin:0 0 .25em}",
+    ":where(.fcms-body img){max-width:100%;height:auto}",
   ].join("\n");
+  var HEADINGS = { h1: 1, h2: 1, h3: 1, h4: 1, h5: 1, h6: 1 };
 
   function warn(err) {
     if (typeof console !== "undefined" && console.warn) console.warn("[femtocms]", err);
@@ -142,7 +145,87 @@
     el.appendChild(p);
   }
 
+  function fieldList(el, fallback) {
+    var raw = el.getAttribute("data-fields");
+    var list = raw ? raw.split(",") : fallback;
+    return list.map(function (s) { return s.trim(); }).filter(Boolean);
+  }
+
+  // Detail view. The only HTML inserted as markup is item.html[field]: the CMS renders it from Markdown with raw HTML escaped and unsafe URLs removed.
+  function renderEntry(el, item) {
+    var locale = el.getAttribute("data-locale") || document.documentElement.lang || "";
+    var html = item.html && typeof item.html === "object" ? item.html : {};
+    var fields = fieldList(el, ["title", "publishedAt"].concat(Object.keys(html)));
+    var heading = (el.getAttribute("data-heading") || "h1").toLowerCase();
+    if (HEADINGS[heading] !== 1) heading = "h1";
+    var article = document.createElement("article");
+    article.className = "fcms-entry";
+    fields.forEach(function (name) {
+      var node = null;
+      var title = item.data ? item.data.title : undefined;
+      if (Object.prototype.hasOwnProperty.call(html, name) && typeof html[name] === "string") {
+        var cls = className(name);
+        node = document.createElement("div");
+        node.className = "fcms-body" + (cls ? " fcms-field-" + cls : "");
+        node.innerHTML = html[name];
+      } else if (name === "title" && (typeof title === "string" || typeof title === "number") && String(title)) {
+        node = document.createElement(heading);
+        node.className = "fcms-title";
+        node.textContent = String(title);
+      } else {
+        node = renderField(name, item, locale);
+      }
+      if (node) article.appendChild(node);
+    });
+    el.textContent = "";
+    el.appendChild(article);
+    var docTitle = item.data ? item.data.title : undefined;
+    if (el.hasAttribute("data-document-title") && typeof docTitle === "string" && docTitle) {
+      document.title = document.title ? docTitle + " | " + document.title : docTitle;
+    }
+  }
+
+  function entryKey(el) {
+    var fixed = el.getAttribute("data-slug");
+    if (fixed) return fixed;
+    var params = new URLSearchParams(window.location.search);
+    return params.get(el.getAttribute("data-param") || "slug") || "";
+  }
+
+  function buildEntryUrl(collection, key) {
+    var url = new URL(base + "/api/" + encodeURIComponent(collection) + "/" + encodeURIComponent(key));
+    var preview = new URLSearchParams(window.location.search).get("preview");
+    if (preview) url.searchParams.set("preview", preview);
+    return url.toString();
+  }
+
   var latest = new WeakMap();
+
+  function renderEntryElement(el) {
+    var token = {};
+    latest.set(el, token);
+    var collection = el.getAttribute("data-femtocms-entry");
+    if (!collection) return Promise.resolve();
+    var key = entryKey(el);
+    if (!key) {
+      renderEmpty(el);
+      return Promise.resolve();
+    }
+    return Promise.resolve()
+      .then(function () { return fetch(buildEntryUrl(collection, key), { credentials: "omit" }); })
+      .then(function (res) {
+        if (res.status === 404) return null;
+        if (!res.ok) throw new Error("HTTP " + res.status + " for " + collection + "/" + key);
+        return res.json();
+      })
+      .then(function (body) {
+        if (latest.get(el) !== token) return;
+        if (body === null) return renderEmpty(el);
+        if (!body || typeof body !== "object" || !body.data) throw new Error("unexpected response for " + collection + "/" + key);
+        renderEntry(el, body);
+      })
+      .catch(warn);
+  }
 
   function renderElement(el) {
     var token = {};
@@ -165,15 +248,17 @@
   }
 
   function refresh() {
-    var els = document.querySelectorAll("[data-femtocms]");
-    if (!els.length) return Promise.resolve();
+    var lists = document.querySelectorAll("[data-femtocms]");
+    var entries = document.querySelectorAll("[data-femtocms-entry]");
+    if (!lists.length && !entries.length) return Promise.resolve();
     if (!base) {
       warn("cannot determine the femtocms origin; set window.FEMTOCMS_BASE or load this file via <script src>");
       return Promise.resolve();
     }
     ensureStyle();
     var jobs = [];
-    for (var i = 0; i < els.length; i++) jobs.push(renderElement(els[i]));
+    for (var i = 0; i < lists.length; i++) jobs.push(renderElement(lists[i]));
+    for (var j = 0; j < entries.length; j++) jobs.push(renderEntryElement(entries[j]));
     return Promise.all(jobs).then(function () {});
   }
 

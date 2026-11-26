@@ -187,11 +187,35 @@ MCP のエンドポイントは `https://<サイト>/mcp`（Streamable HTTP、�
 | `data-femtocms` | コレクション名（必須）。 |
 | `data-limit` | 件数。1〜100（既定 5）。公開日の新しい順。 |
 | `data-fields` | 表示するフィールドをカンマ区切りで、表示順に指定。既定は `publishedAt,title`。`publishedAt`・`createdAt`・`updatedAt` は日付として表示します。データのフィールドは、値が文字列か数値なら（text・textarea・number・datetime・単一の select、Markdown の原文）テキストとして、image なら `<img>` として表示し、それ以外の値（list・複数選択・参照・JSON）は表示しません。 |
-| `data-href` | リンク先の型。`/news/{slug}` や `/news?id={id}` のように書きます。指定しなければリンクしません。femtocms は記事ページ自体は配信しません。 |
+| `data-href` | リンク先の型。`/news.html?slug={slug}` や `/news?id={id}` のように書きます。指定しなければリンクしません。femtocms は記事ページ自体は配信しません。自分のページに[詳細の埋め込み](#記事ページ)を置いてください。 |
 | `data-locale` | 日付のロケール（既定はページの `<html lang>`）。 |
 | `data-empty` | エントリがないときに表示するメッセージ。 |
 
 スクリプトは `<ul class="fcms-list">` と `<li class="fcms-item">` を描画します。リンクは `.fcms-link`、タイトルは `.fcms-title`、日付は `<time class="fcms-date">`、そのほかのフィールドは `.fcms-field` と `.fcms-field-<フィールド名>`、画像は `.fcms-image`、空メッセージは `.fcms-empty` です。標準の CSS は最小限で `:where()` を使っているので、自分で書いたルールが必ず優先されます。別のホストから読み込むときは、先に `window.FEMTOCMS_BASE = "https://<サイト>"` を設定してください。新しい要素を追加したあとなどは `window.femtocms.refresh()` で再描画できます。
+
+### 記事ページ
+
+自分のサイトにページを1枚（たとえば `news.html`）用意して、次を貼ります。
+
+```html
+<div data-femtocms-entry="news" data-empty="記事が見つかりません"></div>
+<script src="https://<サイト>/embed.js" defer></script>
+```
+
+一覧のほうには `data-href="news.html?slug={slug}"` を付けます。このページは自分の URL の `?slug=` を読み取って公開済みの記事を取得し、`<article class="fcms-entry">` の中にタイトル（`<h1 class="fcms-title">`）・日付（`<time class="fcms-date">`）・Markdown のフィールド（`<div class="fcms-body fcms-field-<フィールド名>">` に HTML で）を描画します。
+
+| 属性 | 内容 |
+|---|---|
+| `data-femtocms-entry` | コレクション名（必須）。 |
+| `data-slug` | URL から読まずに、この slug または id の記事を表示します。 |
+| `data-param` | slug または id が入っている URL パラメータ名（既定 `slug`）。 |
+| `data-fields` | 表示するフィールドを表示順に。既定は `title`・`publishedAt`・すべての Markdown フィールド。Markdown は HTML として、それ以外は一覧と同じように表示します。 |
+| `data-heading` | タイトルの要素。`h1`〜`h6`（既定 `h1`）。 |
+| `data-document-title` | 付けると、ページの `<title>` を「記事タイトル \| 元のタイトル」にします。 |
+| `data-locale` | 日付のロケール。 |
+| `data-empty` | 記事がない・下書き・slug の指定がないときに表示するメッセージ。 |
+
+下書きは表示されません。下書きを実際のページのデザインで確認したいときは、`femtocms preview`（MCP なら `get_preview_url`）で得たトークンをページの URL に付けます: `news.html?slug=<slug>&preview=<トークン>`。Markdown の HTML は CMS が生成したもので、生の HTML はエスケープされ、危険なリンクは取り除かれています。スクリプトが HTML として差し込むのはこれだけです。本文は JavaScript で描画するので、サーバで描画するページに比べると検索エンジンには拾われにくいことがあります。
 
 ## キャッシュ
 

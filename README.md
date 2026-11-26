@@ -187,11 +187,35 @@ The MCP endpoint is `https://<your-site>/mcp` (Streamable HTTP, stateless) and n
 | `data-femtocms` | Collection name (required). |
 | `data-limit` | Number of entries, 1 to 100 (default 5). Newest published first. |
 | `data-fields` | Comma-separated fields to show, in order. Default `publishedAt,title`. `publishedAt`, `createdAt` and `updatedAt` are shown as dates. A data field is shown as text when its value is a string or a number (text, textarea, number, datetime, a single select, and the Markdown source), and an image field as an `<img>`; other values (lists, multiple selections, references, JSON) are skipped. |
-| `data-href` | Link template such as `/news/{slug}` or `/news?id={id}`. Without it, items are not links. femtocms does not serve article pages itself. |
+| `data-href` | Link template such as `/news.html?slug={slug}` or `/news?id={id}`. Without it, items are not links. femtocms does not serve article pages itself; use the [article embed](#article-page) on your own page. |
 | `data-locale` | Locale for dates (default: the page's `<html lang>`). |
 | `data-empty` | Message shown when there are no entries. |
 
 The script renders `<ul class="fcms-list">` with `<li class="fcms-item">`; links are `.fcms-link`, the title is `.fcms-title`, dates are `<time class="fcms-date">`, other fields are `.fcms-field` plus `.fcms-field-<name>`, images are `.fcms-image`, and the empty message is `.fcms-empty`. The built-in CSS is minimal and uses `:where()`, so any rule you write wins. When the script is loaded from another host, set `window.FEMTOCMS_BASE = "https://<your-site>"` first. Call `window.femtocms.refresh()` to render again, for example after inserting new elements.
+
+### Article page
+
+Make one page on your site (for example `news.html`) and paste:
+
+```html
+<div data-femtocms-entry="news" data-empty="Article not found"></div>
+<script src="https://<your-site>/embed.js" defer></script>
+```
+
+and point the list at it with `data-href="news.html?slug={slug}"`. The page reads `?slug=` from its own URL, fetches that published entry and renders `<article class="fcms-entry">` with the title (`<h1 class="fcms-title">`), the date (`<time class="fcms-date">`) and every Markdown field as HTML (`<div class="fcms-body fcms-field-<name>">`).
+
+| Attribute | Meaning |
+|---|---|
+| `data-femtocms-entry` | Collection name (required). |
+| `data-slug` | Show this slug or id instead of reading it from the URL. |
+| `data-param` | URL parameter that holds the slug or id (default `slug`). |
+| `data-fields` | Fields to show, in order. Default: `title`, `publishedAt`, then every Markdown field. Markdown fields are rendered as HTML, other fields as in the list. |
+| `data-heading` | Element for the title: `h1` to `h6` (default `h1`). |
+| `data-document-title` | Present: set the page's `<title>` to `<article title> \| <current title>`. |
+| `data-locale` | Locale for dates. |
+| `data-empty` | Message shown when the entry does not exist, is a draft, or no slug was given. |
+
+Drafts are not shown. To check a draft on your real page design, add the token from `femtocms preview` (or the MCP tool `get_preview_url`) to the page URL: `news.html?slug=<slug>&preview=<token>`. Markdown HTML is produced by the CMS with raw HTML escaped and unsafe links removed; it is the only markup the script inserts. The content is rendered by JavaScript, so search engines may not index it as well as server-rendered pages.
 
 ## Caching
 

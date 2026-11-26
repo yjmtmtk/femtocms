@@ -240,7 +240,8 @@ D1 にテーブル `collections`, `entries`, `media`, `api_keys` を作る。ゴ
    <script src="https://<worker>/embed.js" defer></script>
    ```
    公開済みエントリの一覧を、素の HTML（`<ul>` とクラス名）で描画する。見た目は最小限のデフォルト CSS だけにし、クラス名で上書きできるようにする。表示する項目（タイトル・日付など）は data 属性で指定する。
-   - クリックしたときのリンク先【判断】: 既定ではリンクしない。`data-href="/news/{slug}"` のように URL の型を書けば、各項目がそのページへリンクする。femtocms が記事ページそのものを配信することはしない。
+   - クリックしたときのリンク先【判断】: 既定ではリンクしない。`data-href="news.html?slug={slug}"` のように URL の型を書けば、各項目がそのページへリンクする。femtocms が記事ページそのものを配信することはしない。
+   - 記事ページ（利用者の決定、2026-11-26 追加）: 利用者のページに `<div data-femtocms-entry="news">` と embed.js を貼ると、URL の `?slug=` の公開記事（タイトル・日付・Markdown 本文）を描画する。ページ URL の `preview` トークンは API に渡し、下書きを実際のデザインで確認できる。
 2. **自分で取得**: `fetch("https://<worker>/api/news?limit=5")`。README に、そのままコピペで使える例を載せる。
 
 ## 11. 将来の拡張（v2 以降の候補）

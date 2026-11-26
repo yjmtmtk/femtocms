@@ -7,6 +7,7 @@ import { loadPreview } from "./core/preview";
 import type { Env } from "./env";
 import { authMiddleware } from "./http/auth";
 import { errorResponse } from "./http/errors";
+import { mcpApp } from "./mcp/server";
 import { api } from "./http/routes";
 import { renderPreviewPage } from "./public/preview-page";
 import { VERSION } from "./version";
@@ -62,6 +63,7 @@ app.get("/preview/:token", async (c) => {
 
 app.use("/api/*", authMiddleware);
 app.route("/api", api);
+app.route("/mcp", mcpApp);
 
 app.notFound(() => errorResponse(new FemtoError("not_found", "見つかりません", { hint: "GET /api/collections で利用可能なコレクションを確認してください" })));
 app.onError((err) => errorResponse(err));

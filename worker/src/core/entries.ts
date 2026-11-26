@@ -61,10 +61,26 @@ async function requireRow(ctx: Ctx, c: Collection, idOrSlug: string): Promise<En
 }
 
 // Public may read published entries of public collections; read: published of any; admin: everything.
-function visible(ctx: Ctx, c: Collection, row: EntryRow, allowDraft?: boolean): boolean {
-  if (allowDraft || ctx.role === "admin") return true;
+export function canRead(ctx: Ctx, c: Collection, status: Status): boolean {
+  if (ctx.role === "admin") return true;
   if (ctx.role === "public" && !c.public) return false;
-  return row.status === "published";
+  return status === "published";
+}
+
+function visible(ctx: Ctx, c: Collection, row: EntryRow, allowDraft?: boolean): boolean {
+  return !!allowDraft || canRead(ctx, c, row.status);
+}
+
+/** One query for many entries (not trashed, no visibility filter; callers apply canRead). Ids go in as a JSON array so D1's bind limit doesn't matter. */
+export async function getEntryRecordsByIds(ctx: Ctx, ids: string[], collectionIds: string[]): Promise<EntryRecord[]> {
+  const { results } = await ctx.db
+    .prepare(
+      "SELECT * FROM entries WHERE deleted_at IS NULL AND id IN (SELECT value FROM json_each(?)) " +
+        "AND collection_id IN (SELECT value FROM json_each(?))",
+    )
+    .bind(JSON.stringify(ids), JSON.stringify(collectionIds))
+    .all<EntryRow>();
+  return results.map(toRecord);
 }
 
 async function readEntry(ctx: Ctx, name: string, idOrSlug: string | null, opts?: { allowDraft?: boolean }): Promise<EntryRecord> {

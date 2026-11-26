@@ -9,6 +9,7 @@ import { authMiddleware } from "./http/auth";
 import { errorResponse } from "./http/errors";
 import { mcpApp } from "./mcp/server";
 import { api } from "./http/routes";
+import EMBED from "./public/embed.client.js";
 import { renderPreviewPage } from "./public/preview-page";
 import { VERSION } from "./version";
 
@@ -37,6 +38,17 @@ app.get("/", (c) => {
     openapi: `${origin}/api/openapi.json`,
   });
 });
+
+// The LP embed script: two lines of HTML on any page render a collection as a news list.
+app.get("/embed.js", () =>
+  new Response(EMBED, {
+    headers: {
+      "Content-Type": "text/javascript; charset=utf-8",
+      "Cache-Control": "public, max-age=300",
+      "X-Content-Type-Options": "nosniff",
+      "Access-Control-Allow-Origin": "*",
+    },
+  }));
 
 // The filename segment is cosmetic (for humans and downloads); the id alone identifies the file.
 app.get("/media/:id/:filename?", (c) => serveMedia(createCtx(c.env, new URL(c.req.url).origin, "public"), c.req.param("id")));

@@ -14,3 +14,15 @@ it("マイグレーション済みのテーブルがある", async () => {
   const r = await env.DB.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='entries'").first();
   expect(r).not.toBeNull();
 });
+
+it("GET /embed.js は埋め込みスクリプトを JS として配信する", async () => {
+  const res = await SELF.fetch("https://cms.test/embed.js");
+  expect(res.status).toBe(200);
+  expect(res.headers.get("Content-Type")).toBe("text/javascript; charset=utf-8");
+  expect(res.headers.get("Cache-Control")).toBe("public, max-age=300");
+  expect(res.headers.get("X-Content-Type-Options")).toBe("nosniff");
+  expect(res.headers.get("Access-Control-Allow-Origin")).toBe("*");
+  const body = await res.text();
+  expect(body).toContain("window.femtocms");
+  expect(body).toContain("data-femtocms");
+});

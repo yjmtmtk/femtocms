@@ -127,6 +127,7 @@ femtocms は、管理画面のない CMS です。**自分の Cloudflare アカ�
 |---|---|
 | `init [--name <name>] [--domain <host>]` | 自分の Cloudflare アカウントに femtocms をデプロイし、接続情報を保存します。`--name`（既定 `femtocms`）は Worker・D1・R2・プロファイルの名前で、同じアカウントに複数のサイトを置けます。`--domain` は独自ドメインの割り当てです（そのドメインが Cloudflare にあること）。 |
 | `upgrade` | インストールしたパッケージに同梱の Worker をデプロイし、マイグレーションを適用します。 |
+| `reset [--confirm <サイト名>]` | すべてのコンテンツ（エントリ・メディア・コレクション）をゴミ箱へ移します。API キーは残ります。完全には消えません（消すには `trash empty --confirm <サイト名>`）。 |
 | `destroy` | Worker・D1・R2 を削除します（[アンインストール](#アンインストール)を参照）。 |
 | `login --url <url> --key <key> [--name <profile>]` | 既存のサイトをこのマシンに登録します。 |
 | `logout [--name <profile>]` | 保存済みのプロファイルを削除します。 |

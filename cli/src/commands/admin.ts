@@ -99,6 +99,11 @@ function timestamp(d = new Date()): string {
   return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
 }
 
+export async function resetCmd(client: FemtoClient, opts: ConfirmOpts): Promise<unknown> {
+  const confirm = await resolveConfirm(opts, "すべてのコンテンツ（エントリ・メディア・コレクション）をゴミ箱へ移します。API キーは残ります。");
+  return client.request("POST", "/api/reset", { json: { confirm } });
+}
+
 export interface ExportOpts { out?: string; fetch?: typeof fetch }
 
 export async function exportCmd(client: FemtoClient, opts: ExportOpts): Promise<unknown> {
@@ -268,6 +273,20 @@ export function registerAdmin(program: Command): void {
     .action(
       guarded(async (id: string, o: object, cmd: Command) => {
         print(await keysRevoke(clientFor(cmd), id, o), { json: isJson(cmd), human: () => `無効にしました: ${id}` });
+      }),
+    );
+
+  program
+    .command("reset")
+    .description("すべてのコンテンツ（エントリ・メディア・コレクション）をゴミ箱へ移します。完全には消えません（サイト名の確認が必要）")
+    .option("--confirm <site>", "サイト名（省略時、対話端末なら入力を促します）")
+    .action(
+      guarded(async (o: ConfirmOpts, cmd: Command) => {
+        print(await resetCmd(clientFor(cmd), o), {
+          json: isJson(cmd),
+          human: (r) =>
+            `ゴミ箱へ移しました（${(r as { trashed: number }).trashed} 件）。完全に削除するには femtocms trash empty --confirm <site> を実行してください`,
+        });
       }),
     );
 

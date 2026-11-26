@@ -7,7 +7,7 @@ import {
   collectionsCreate, collectionsDelete, collectionsUpdate, entriesCreate, entriesDelete, entriesGet, entriesList, entriesPublish,
   entriesUpdate, mediaUpload, previewCmd, trashDelete, trashEmpty, trashRestore,
 } from "../src/commands/content";
-import { exportCmd, importCmd, keysCreate, keysRevoke } from "../src/commands/admin";
+import { exportCmd, importCmd, keysCreate, keysRevoke, resetCmd } from "../src/commands/admin";
 import { setExit } from "../src/output";
 import { buildProgram } from "../src/index";
 
@@ -316,6 +316,26 @@ describe("trash", () => {
     expect(r.calls[0]).toMatchObject({ method: "DELETE", path: "/api/trash", search: "?confirm=dev-site" });
   });
 
+  it("reset は POST /api/reset に { confirm } を送る", async () => {
+    const r = recorder({ "POST /api/reset": { trashed: 3 } });
+    expect(await resetCmd(r.client, { confirm: "dev-site" })).toEqual({ trashed: 3 });
+    expect(r.calls[0]).toMatchObject({ method: "POST", path: "/api/reset", json: { confirm: "dev-site" } });
+  });
+
+  it("reset は TTY ならプロンプトの答えを confirm にする", async () => {
+    const r = recorder({ "POST /api/reset": { trashed: 0 } });
+    const prompter = vi.fn(async () => "dev-site");
+    await resetCmd(r.client, { isTTY: true, prompter });
+    expect(prompter).toHaveBeenCalledOnce();
+    expect(r.calls[0]!.json).toEqual({ confirm: "dev-site" });
+  });
+
+  it("reset は TTY でなく --confirm も無ければリクエスト前にエラー", async () => {
+    const r = recorder();
+    await expect(resetCmd(r.client, { isTTY: false })).rejects.toThrow("pass --confirm <site>");
+    expect(r.calls).toEqual([]);
+  });
+
   it("trash delete も confirm を渡す。restore は POST", async () => {
     const r = recorder({ "DELETE /api/trash/e_1": null, "POST /api/trash/e_1/restore": entry });
     await trashDelete(r.client, "e_1", { confirm: "dev-site" });
@@ -553,6 +573,25 @@ describe("commander wiring", () => {
     await expect(run("trash", "empty")).rejects.toThrow("exit 2");
     expect(err.join("")).toContain("pass --confirm <site>");
     expect(r.calls).toEqual([]);
+  });
+
+  it("reset は非 TTY で --confirm 無しならエラー終了（API を呼ばない）", async () => {
+    const r = recorder();
+    vi.stubGlobal("fetch", r.fetchImpl);
+    await expect(run("reset")).rejects.toThrow("exit 2");
+    expect(err.join("")).toContain("pass --confirm <site>");
+    expect(r.calls).toEqual([]);
+  });
+
+  it("reset --confirm は件数と trash empty の案内を表示し、--json は生の応答を出す", async () => {
+    const r = recorder({ "POST /api/reset": { trashed: 4 } });
+    vi.stubGlobal("fetch", r.fetchImpl);
+    await run("reset", "--confirm", "dev-site");
+    expect(out.join("")).toContain("4 件");
+    expect(out.join("")).toContain("femtocms trash empty --confirm <site>");
+    out.length = 0;
+    await run("--json", "reset", "--confirm", "dev-site");
+    expect(JSON.parse(out.join(""))).toEqual({ trashed: 4 });
   });
 
   it("keys create は作成したキーを表示する", async () => {

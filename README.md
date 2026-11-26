@@ -127,6 +127,7 @@ Every delete (entries, media, collections) **moves the item to the trash**. Dele
 |---|---|
 | `init [--name <name>] [--domain <host>]` | Deploys femtocms to your Cloudflare account and saves the connection. `--name` (default `femtocms`) names the Worker, D1 database, R2 bucket and the profile, so one account can hold several sites. `--domain` attaches a custom domain (the domain must be on Cloudflare). |
 | `upgrade` | Deploys the Worker bundled with the installed package and applies migrations. |
+| `reset [--confirm <site name>]` | Moves all content (entries, media, collections) to the trash; API keys are kept. Nothing is deleted for good: `trash empty --confirm <site name>` does that. |
 | `destroy` | Deletes the Worker, D1 database and R2 bucket (see [Uninstall](#uninstall)). |
 | `login --url <url> --key <key> [--name <profile>]` | Saves an existing site on this machine. |
 | `logout [--name <profile>]` | Removes a saved profile. |

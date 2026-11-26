@@ -19,6 +19,7 @@
   },
   "files": [
     "dist",
+    "!dist/**/*.map",
     "worker/migrations",
     "README.md",
     "README.ja.md",

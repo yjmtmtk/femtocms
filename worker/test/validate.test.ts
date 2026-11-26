@@ -122,4 +122,38 @@ describe("validateData", () => {
     const r = validateData(F, { faq: [{ q: "a" }, "x"] }, { enforceRequired: true, ignoreUnknown: false });
     expect(r.issues).toContainEqual(expect.objectContaining({ path: "data.faq[1]" }));
   });
+
+  it("null は「クリア」として issue なしで受け付け、data から落とす", () => {
+    const fields: FieldDef[] = [
+      { name: "cover", type: "image" },
+      { name: "meta", type: "json" },
+      { name: "n", type: "number" },
+      { name: "flag", type: "boolean", default: true },
+    ];
+    const r = validateData(fields, { cover: null, meta: null, n: null, flag: null }, { enforceRequired: false });
+    expect(r.issues).toEqual([]);
+    expect(r.data).toEqual({});
+  });
+
+  it("required は 欠落・null・空文字・空配列 をすべて欠落として報告する", () => {
+    const fields: FieldDef[] = [
+      { name: "title", type: "text", required: true },
+      { name: "tags", type: "select", options: ["a"], multiple: true, required: true },
+      { name: "cover", type: "image", required: true },
+    ];
+    const r = validateData(fields, { title: "", tags: [], cover: null }, { enforceRequired: true });
+    expect(r.issues.map(i => [i.path, i.message])).toEqual([["data.title", "required"], ["data.tags", "required"], ["data.cover", "required"]]);
+    // 下書きでは required を問わない（"" は値として保持される）
+    const draft = validateData(fields, { title: "", tags: [] }, { enforceRequired: false });
+    expect(draft.issues).toEqual([]);
+    expect(draft.data).toEqual({ title: "", tags: [] });
+  });
+
+  it("datetime はカレンダー上存在しない日付を拒否する", () => {
+    const f: FieldDef[] = [{ name: "at", type: "datetime" }];
+    for (const bad of ["2026-02-31T00:00:00Z", "2026-02-31", "2026-04-31", "2025-02-29", "2026-00-10", "2026-01-00"]) {
+      expect(validateData(f, { at: bad }, { enforceRequired: false }).issues).toHaveLength(1);
+    }
+    expect(validateData(f, { at: "2024-02-29" }, { enforceRequired: false }).issues).toEqual([]);
+  });
 });

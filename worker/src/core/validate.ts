@@ -70,8 +70,14 @@ const number: Checker = (f, v, path, w) => {
 const boolean: Checker = (_f, v, path, w) =>
   typeof v === "boolean" ? v : fail(w, path, "must be a boolean", "boolean (true or false)", v);
 
+// Date.parse rolls "2026-02-31" over to March; reject calendar-invalid Y-M-D up front.
+function validDatePrefix(s: string): boolean {
+  const [y, m, d] = s.slice(0, 10).split("-").map(Number);
+  return m >= 1 && m <= 12 && d >= 1 && d <= new Date(Date.UTC(y, m, 0)).getUTCDate();
+}
+
 const datetime: Checker = (_f, v, path, w) => {
-  const t = typeof v === "string" && ISO_RE.test(v) ? Date.parse(v) : NaN;
+  const t = typeof v === "string" && ISO_RE.test(v) && validDatePrefix(v) ? Date.parse(v) : NaN;
   return Number.isNaN(t) ? fail(w, path, "must be an ISO 8601 datetime", DATETIME_EXPECTED, v) : new Date(t).toISOString();
 };
 
@@ -145,12 +151,14 @@ function walkObject(fields: FieldDef[], input: Record<string, unknown>, path: st
     const p = `${path}.${f.name}`;
     let v = Object.hasOwn(input, f.name) ? input[f.name] : undefined;
     if (v === undefined && f.default !== undefined) v = structuredClone(f.default);
-    if (v === undefined) {
-      if (f.required && w.opts.enforceRequired) {
-        w.issues.push({ path: p, message: "required", expected: expectedOf(f) });
-      }
+    // Missing / null / "" / [] all count as "no value" for required. null also means "clear this
+    // field" (R8): accepted without an issue and omitted from `data`.
+    const empty = v === undefined || v === null || v === "" || (Array.isArray(v) && v.length === 0);
+    if (empty && f.required && w.opts.enforceRequired) {
+      w.issues.push({ path: p, message: "required", expected: expectedOf(f) });
       continue;
     }
+    if (v === undefined || v === null) continue;
     const checked = CHECKERS[f.type](f, v, p, w);
     if (checked !== undefined) out[f.name] = checked;
   }

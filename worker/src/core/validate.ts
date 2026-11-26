@@ -4,7 +4,12 @@ import type { FieldDef } from "./types";
 export interface ValidateResult {
   data: Record<string, unknown>;
   issues: Issue[];
-  refs: { media: string[]; entries: { collection: string; id: string }[] };
+  refs: {
+    media: string[];
+    entries: { collection: string; id: string }[];
+    // Where each ref was written, for issue paths: media by id, entries by `${collection}/${id}`.
+    paths: { media: Record<string, string[]>; entries: Record<string, string[]> };
+  };
 }
 
 // enforceRequired: report missing required fields (publish). ignoreUnknown: skip the "unknown field"
@@ -101,6 +106,7 @@ const image: Checker = (_f, v, path, w) => {
     return fail(w, path, "must be a media id", imageExpected(), v);
   }
   if (!w.refs.media.includes(id)) w.refs.media.push(id);
+  (w.refs.paths.media[id] ??= []).push(path);
   return id;
 };
 
@@ -111,6 +117,7 @@ const reference: Checker = (f, v, path, w) => {
   }
   const collection = f.collection ?? "";
   if (!w.refs.entries.some(e => e.collection === collection && e.id === id)) w.refs.entries.push({ collection, id });
+  (w.refs.paths.entries[`${collection}/${id}`] ??= []).push(path);
   return id;
 };
 
@@ -180,7 +187,7 @@ function expectedOf(f: FieldDef): string {
 }
 
 export function validateData(fields: FieldDef[], input: unknown, opts: ValidateOptions): ValidateResult {
-  const w: Walk = { opts, issues: [], refs: { media: [], entries: [] } };
+  const w: Walk = { opts, issues: [], refs: { media: [], entries: [], paths: { media: {}, entries: {} } } };
   if (!isObject(input)) {
     w.issues.push({ path: "data", message: "object required", expected: "object", received: input });
     return { data: {}, issues: w.issues, refs: w.refs };

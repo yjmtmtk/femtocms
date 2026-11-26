@@ -31,3 +31,12 @@ export function printError(err: unknown, opts: { json: boolean }): never {
   }
   return exit(api ? 1 : 2);
 }
+
+/** Left-aligned plain-text table; the last column is not padded. */
+export function table(rows: string[][]): string {
+  if (rows.length === 0) return "";
+  const widths = rows[0]!.map((_, i) => Math.max(...rows.map((r) => (r[i] ?? "").length)));
+  return rows
+    .map((r) => r.map((cell, i) => (i === r.length - 1 ? cell : cell.padEnd(widths[i]!))).join("  ").trimEnd())
+    .join("\n");
+}

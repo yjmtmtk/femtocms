@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -149,6 +149,16 @@ describe("runInit", () => {
     expect(text).toContain(`claude mcp add --transport http femtocms ${out.url}/mcp --header "Authorization: Bearer ${out.key}"`);
     expect(text).toContain('<div data-femtocms="news" data-limit="5"></div>');
     expect(text).toContain(`<script src="${out.url}/embed.js" defer></script>`);
+    expect(text).toMatch(/サイト名.*--confirm.*: femtocms$/m);
+  });
+
+  it("要約のサイト名は --name の値", async () => {
+    const logs: string[] = [];
+    await runInit({ name: "blog", runner: fakeRunner({
+      ...happy(), "d1 create femtocms-blog": ok('"database_id": "db-9"'), "r2 bucket create femtocms-blog": ok(""),
+      deploy: ok("https://blog.me.workers.dev"),
+    }).run, prompt: fakePrompt().prompt, log: (s) => logs.push(s) });
+    expect(logs.join("\n")).toMatch(/サイト名.*: blog$/m);
   });
 
   it("showSummary:false ではキーを表示に出さない（--json 用）", async () => {
@@ -233,6 +243,26 @@ describe("runInit", () => {
     expect(loadConfig().profiles.femtocms!.site!.accountId).toBe("acc2");
   });
 
+  it("--domain を付けずに再度 init しても、保存済みの domain を保つ", async () => {
+    seedProfile({ url: "https://cms.example.com", site: { ...SITE, domain: "cms.example.com" } });
+    const r = fakeRunner(happy({ deploy: ok("Deployed femtocms triggers\n  cms.example.com (custom domain)") }));
+    const out = await runInit({ name: "femtocms", runner: r.run, prompt: fakePrompt().prompt, log: () => {}, fetch: fakeFetch(200).fn });
+    expect(out.url).toBe("https://cms.example.com");
+    expect(loadConfig().profiles.femtocms!.site!.domain).toBe("cms.example.com");
+    expect(r.calls.find((c) => c.args[0] === "deploy")!.configAtCall!.routes).toEqual([{ pattern: "cms.example.com", custom_domain: true }]);
+  });
+
+  it("r2 bucket create が already exists（code 10004）で失敗したら、作成済みとして再利用する", async () => {
+    for (const stderr of ["✘ [ERROR] The bucket you tried to create already exists, and you own it. [code: 10004]", "[code: 10004]"]) {
+      saveConfig({ profiles: {} }); // a fresh site each time
+      const r = fakeRunner(happy({ "r2 bucket create femtocms-femtocms": bad(stderr) }));
+      const logs: string[] = [];
+      await runInit({ name: "femtocms", runner: r.run, prompt: fakePrompt().prompt, log: (s) => logs.push(s) });
+      expect(r.has("deploy")).toBe(true);
+      expect(logs.join("\n")).toContain("再利用");
+    }
+  });
+
   it("--domain ではカスタムドメインの URL を使い、設定に routes を入れる", async () => {
     const r = fakeRunner(happy({ deploy: ok("Deployed femtocms triggers\n  femtocms.example.com (custom domain)") }));
     const out = await runInit({ name: "femtocms", domain: "cms.example.com", runner: r.run, prompt: fakePrompt().prompt, log: () => {} });
@@ -307,15 +337,28 @@ describe("runInit", () => {
 });
 
 describe("runUpgrade", () => {
-  it("保存済みの site から設定を作り直し、deploy と migrations apply だけ行う", async () => {
+  it("保存済みの site から設定を作り直し、migrations apply を先に、そのあと deploy だけ行う", async () => {
     seedProfile();
     const r = fakeRunner({ deploy: ok("https://femtocms.me.workers.dev"), "d1 migrations": ok() });
     await runUpgrade({ profile: "femtocms", runner: r.run, log: () => {} });
-    expect(r.names()).toEqual(["deploy --config", "d1 migrations"]);
+    expect(r.names()).toEqual(["d1 migrations", "deploy --config"]);
     expect(r.calls.every((c) => c.env?.CLOUDFLARE_ACCOUNT_ID === "acc1")).toBe(true);
-    const migrate = r.calls[1]!.args;
+    const migrate = r.calls[0]!.args;
     expect(migrate.slice(0, 5)).toEqual(["d1", "migrations", "apply", "femtocms-femtocms", "--remote"]);
-    expect(existsSync(r.calls[0]!.args[2]!)).toBe(true);
+    expect(existsSync(r.calls[1]!.args[2]!)).toBe(true);
+  });
+
+  it("deploy の出力に URL が無くても upgrade は成功し、保存済みの URL を返す", async () => {
+    seedProfile();
+    const r = fakeRunner({ deploy: ok("Uploaded femtocms\nDone."), "d1 migrations": ok() });
+    expect(await runUpgrade({ profile: "femtocms", runner: r.run, log: () => {} })).toEqual({ url: "https://femtocms.me.workers.dev" });
+  });
+
+  it("マイグレーションが失敗したら deploy しない", async () => {
+    seedProfile();
+    const r = fakeRunner({ deploy: ok("https://femtocms.me.workers.dev"), "d1 migrations": bad("boom") });
+    await expect(runUpgrade({ profile: "femtocms", runner: r.run, log: () => {} })).rejects.toThrow(/boom/);
+    expect(r.has("deploy")).toBe(false);
   });
 
   it("--cors-origins を指定すれば保存して設定に書き、無ければ保存済みの値を使い、空文字なら消す", async () => {
@@ -441,6 +484,26 @@ describe("runDestroy", () => {
       expect(r.names()).toEqual(["r2 bucket"]);
       expect(loadConfig().profiles.femtocms).toBeDefined();
     }
+  });
+});
+
+describe("保存済みの Worker 名の再検証（設定ファイルを書き換えられても外のパスを消さない）", () => {
+  it("upgrade と destroy は、名前として使えない workerName を wrangler を呼ぶ前・ファイルを消す前に断る", async () => {
+    const outside = join(tmp, "outside");
+    mkdirSync(outside);
+    writeFileSync(join(outside, "keep.txt"), "x");
+    for (const workerName of ["../../outside", "Bad", ""]) {
+      seedProfile({ site: { ...SITE, workerName } });
+      const r = fakeRunner({ deploy: ok(), "d1 migrations": ok(), delete: ok(), "d1 delete": ok(), "r2 bucket delete": ok() });
+      await expect(runUpgrade({ profile: "femtocms", runner: r.run, log: () => {} }), workerName).rejects.toThrow(/使えません/);
+      const f = fakeFetch();
+      await expect(runDestroy({ profile: "femtocms", runner: r.run, prompt: fakePrompt({ texts: [workerName] }).prompt, log: () => {}, fetch: f.fn }), workerName)
+        .rejects.toThrow(/使えません/);
+      expect(r.calls).toHaveLength(0);
+      expect(f.calls).toHaveLength(0);
+      expect(loadConfig().profiles.femtocms).toBeDefined();
+    }
+    expect(existsSync(join(outside, "keep.txt"))).toBe(true);
   });
 });
 

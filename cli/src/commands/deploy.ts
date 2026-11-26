@@ -150,6 +150,8 @@ async function ensureDatabase(run: WranglerRunner, d1Name: string, log: (s: stri
   return id;
 }
 
+const BUCKET_EXISTS = /\[code: 10004\]|already exists/i;
+
 async function ensureBucket(run: WranglerRunner, bucket: string, accountId: string, prompt: Prompter, log: (s: string) => void): Promise<void> {
   for (;;) {
     let step = await run(["r2", "bucket", "list"]);
@@ -161,6 +163,11 @@ async function ensureBucket(run: WranglerRunner, bucket: string, accountId: stri
       log(`R2 バケット ${bucket} を作成します`);
       step = await run(["r2", "bucket", "create", bucket]);
       if (step.code === 0) return;
+      // The list is not paginated, so a bucket beyond its first page shows up here instead.
+      if (BUCKET_EXISTS.test(`${step.stdout}\n${step.stderr}`)) {
+        log(`R2 バケット ${bucket} は作成済みです。再利用します`);
+        return;
+      }
     }
     if (!isR2NotEnabled(step)) throw failure("R2 の確認・作成", step);
     log(
@@ -171,8 +178,11 @@ async function ensureBucket(run: WranglerRunner, bucket: string, accountId: stri
   }
 }
 
-/** Deploys and returns the site URL. A brand-new account has no workers.dev subdomain: wrangler must ask the user, so that one step runs interactively. */
-async function deploy(run: WranglerRunner, site: Site, log: (s: string) => void): Promise<string> {
+/**
+ * Deploys and returns the site URL (undefined when it cannot be read from wrangler's output: only init needs it) with the
+ * tail of that output. A brand-new account has no workers.dev subdomain: wrangler must ask the user, so that one step runs interactively.
+ */
+async function deploy(run: WranglerRunner, site: Site, log: (s: string) => void): Promise<{ url?: string; tail: string }> {
   const args = ["deploy"];
   let r = await run(args);
   if (r.code !== 0 && /workers\.dev subdomain/i.test(`${r.stdout}\n${r.stderr}`)) {
@@ -182,10 +192,8 @@ async function deploy(run: WranglerRunner, site: Site, log: (s: string) => void)
     r = await run(args);
   }
   if (r.code !== 0) throw failure("デプロイ", r);
-  if (site.domain) return `https://${site.domain}`;
-  const url = findWorkersDevUrl(`${r.stdout}\n${r.stderr}`, site.workerName);
-  if (!url) throw new Error(`デプロイの出力から URL を取得できませんでした。出力の末尾:\n${outputTail(r)}`);
-  return url;
+  const url = site.domain ? `https://${site.domain}` : findWorkersDevUrl(`${r.stdout}\n${r.stderr}`, site.workerName);
+  return { url, tail: outputTail(r) };
 }
 
 async function migrate(run: WranglerRunner, d1Name: string): Promise<void> {
@@ -205,11 +213,12 @@ async function savedKeyWorks(profile: Profile | undefined, url: string, fetchImp
   }
 }
 
-export function summaryLines(out: { url: string; key: string; mcpUrl: string }, keyIsNew: boolean): string[] {
+export function summaryLines(out: { url: string; key: string; mcpUrl: string }, keyIsNew: boolean, siteName: string): string[] {
   return [
     "",
     "femtocms の準備ができました。",
     "",
+    `サイト名（trash empty・reset・import --replace の --confirm に使います）: ${siteName}`,
     `API の URL: ${out.url}`,
     `管理キー:   ${out.key}`,
     keyIsNew
@@ -254,9 +263,10 @@ export async function runInit(opts: InitOpts): Promise<{ url: string; key: strin
   const bucket = `femtocms-${name}`;
 
   // The config exists before the first D1/R2 call (it pins the account); the database id is filled in once known.
+  const domain = opts.domain ?? saved?.domain; // a re-run without --domain keeps the custom domain
   const draft: Site = withCors({
     workerName: name, d1Name, d1Id: "", bucket, accountId,
-    ...(opts.domain ? { domain: opts.domain } : {}),
+    ...(domain ? { domain } : {}),
     ...(saved?.corsOrigins ? { corsOrigins: saved.corsOrigins } : {}),
   }, cors);
   const configPath = writeSiteConfig(draft);
@@ -268,7 +278,9 @@ export async function runInit(opts: InitOpts): Promise<{ url: string; key: strin
   const site: Site = { ...draft, d1Id };
   writeSiteConfig(site);
   log("Worker をデプロイします（少し時間がかかります）");
-  const url = await deploy(run, site, log);
+  const deployed = await deploy(run, site, log);
+  if (!deployed.url) throw new Error(`デプロイの出力から URL を取得できませんでした。出力の末尾:\n${deployed.tail}`);
+  const url = deployed.url;
   log("データベースのマイグレーションを適用します");
   await migrate(run, d1Name);
 
@@ -293,7 +305,7 @@ export async function runInit(opts: InitOpts): Promise<{ url: string; key: strin
   saveConfig(config);
 
   const out = { url, key, mcpUrl: `${url}/mcp` };
-  if (opts.showSummary !== false) for (const line of summaryLines(out, keyIsNew)) log(line);
+  if (opts.showSummary !== false) for (const line of summaryLines(out, keyIsNew, name)) log(line);
   return out;
 }
 
@@ -304,6 +316,8 @@ function siteOf(profile: string): { profile: Profile; site: Site } {
   const p = Object.hasOwn(config.profiles, profile) ? config.profiles[profile] : undefined;
   if (!p) throw new Error(`プロファイル "${profile}" は登録されていません`);
   if (!p.site) throw new Error(`プロファイル "${profile}" は femtocms init で作られたものではないため、Cloudflare 側の情報がありません。femtocms init で作り直してください`);
+  // workerName names a directory under sites/ that destroy removes: never trust what the config file says.
+  checkName(String(p.site.workerName));
   return { profile: p, site: p.site };
 }
 
@@ -320,10 +334,11 @@ export async function runUpgrade(opts: {
     saveConfig(config);
   }
   const run = bindSite(opts.runner, site.accountId, writeSiteConfig(site));
-  opts.log("Worker を更新します（少し時間がかかります）");
-  await deploy(run, site, opts.log);
+  // Migrations first: a new Worker may need the new schema, while the old one keeps working on an added table or column.
   opts.log("データベースのマイグレーションを適用します");
   await migrate(run, site.d1Name);
+  opts.log("Worker を更新します（少し時間がかかります）");
+  await deploy(run, site, opts.log); // the URL is already saved; wrangler's output is not needed
   opts.log(`更新しました: ${profile.url}`);
   return { url: profile.url };
 }
@@ -466,7 +481,7 @@ export function registerDeploy(program: Command): void {
 
   program
     .command("upgrade")
-    .description("同梱の最新の Worker をデプロイし、マイグレーションを適用します")
+    .description("マイグレーションを適用してから、同梱の最新の Worker をデプロイします")
     .option("--cors-origins <a,b>", `${corsHelp}。省略時は保存済みの設定のまま`)
     .action(
       guarded(async (o: { corsOrigins?: string }, cmd: Command) => {

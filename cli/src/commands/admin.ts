@@ -57,7 +57,7 @@ export async function resolveConfirm(opts: ConfirmOpts, what: string): Promise<s
   if (opts.confirm) return opts.confirm;
   const tty = opts.isTTY ?? process.stdin.isTTY === true;
   if (!tty) {
-    throw new Error("サイト名の確認が必要です: pass --confirm <site>（サイト名は Worker の SITE_NAME です）");
+    throw new Error("サイト名の確認が必要です: pass --confirm <site>（サイト名は femtocms init の --name。GET / の site で確認できます）");
   }
   const answer = await (opts.prompter ?? clackPrompter)(`${what}\nサイト名を入力してください`);
   if (!answer) throw new Error("キャンセルしました");

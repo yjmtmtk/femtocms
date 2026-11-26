@@ -5,14 +5,17 @@ import {
   createEntry, getEntryRecord, getSingle, listEntryRecords, publishEntry, putSingle, unpublishEntry, updateEntry,
 } from "../core/entries";
 import { createKey, listKeys, revokeKey } from "../core/keys";
+import { requireRole } from "../core/context";
 import {
   importMediaFromUrl, listMedia, MAX_MEDIA_BYTES, updateMedia, uploadMedia, uploadMediaBase64,
 } from "../core/media";
 import { presentEntries, presentEntry, presentMedia } from "../core/present";
+import { createPreviewUrl, MAX_PREVIEW_TTL_SECONDS, readEntryWithPreview } from "../core/preview";
 import { parseListParams } from "../core/query";
 import { deletePermanently, emptyTrash, listTrash, restoreFromTrash, trashCollection, trashEntry, trashMedia } from "../core/trash";
 import type { Status } from "../core/types";
 import type { AuthEnv } from "./auth";
+import { errorResponse } from "./errors";
 
 type C = Context<AuthEnv>;
 
@@ -228,6 +231,19 @@ api.get("/:c/:id", async (c) => {
   const ctx = c.get("ctx");
   const name = c.req.param("c");
   const params = parseListParams(query(c));
+  const token = query(c).get("preview");
+  if (token !== null) {
+    // Anything that used a preview token is per-caller: never let a shared cache keep it.
+    try {
+      const entry = await readEntryWithPreview(ctx, name, c.req.param("id"), token, { fields: params.fields, expand: params.expand });
+      c.header("Cache-Control", "private, no-store");
+      return c.json(entry);
+    } catch (err) {
+      const res = errorResponse(err);
+      res.headers.set("Cache-Control", "no-store");
+      return res;
+    }
+  }
   const record = await getEntryRecord(ctx, name, c.req.param("id"));
   return c.json(await presentEntry(ctx, await getCollection(ctx, name), record, { fields: params.fields, expand: params.expand }));
 });
@@ -255,3 +271,18 @@ for (const [action, run] of [["publish", publishEntry], ["unpublish", unpublishE
     return c.json(await presentEntry(ctx, await getCollection(ctx, name), record, {}));
   });
 }
+
+api.post("/:c/:id/preview", async (c) => {
+  const ctx = c.get("ctx");
+  requireRole(ctx, "admin");
+  const text = await c.req.text();
+  const body = text.trim() === "" ? {} : await jsonObject(c);
+  const ttl = body.ttlSeconds;
+  if (ttl !== undefined && !(Number.isInteger(ttl) && (ttl as number) >= 1 && (ttl as number) <= MAX_PREVIEW_TTL_SECONDS)) {
+    throw invalid([{
+      path: "ttlSeconds", message: `ttlSeconds は 1〜${MAX_PREVIEW_TTL_SECONDS} の整数（秒）です`,
+      expected: `integer 1..${MAX_PREVIEW_TTL_SECONDS}`, received: ttl,
+    }]);
+  }
+  return c.json(await createPreviewUrl(ctx, c.req.param("c"), c.req.param("id"), { ttlSeconds: ttl as number | undefined }));
+});

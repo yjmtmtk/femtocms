@@ -103,6 +103,9 @@ describe("ツール一覧", () => {
     for (const n of ["empty_trash", "delete_permanently", "reset_site", "import_data", "delete_entry", "delete_collection", "delete_media", "revoke_key"]) {
       expect(tool(n).annotations?.destructiveHint, n).toBe(true);
     }
+    for (const n of ["create_collection", "update_collection", "create_entry", "update_entry", "publish_entry", "unpublish_entry", "upload_media", "get_preview_url", "restore_from_trash", "create_key"]) {
+      expect(tool(n).annotations?.destructiveHint, n).toBe(false);
+    }
     for (const n of ["list_collections", "get_collection", "list_entries", "get_entry", "list_media", "list_trash", "list_keys", "export_data"]) {
       expect(tool(n).annotations?.readOnlyHint, n).toBe(true);
     }

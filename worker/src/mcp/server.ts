@@ -59,6 +59,7 @@ function instructions(siteName: string): string {
 
 const READ = { readOnlyHint: true } as const;
 const DESTRUCTIVE = { destructiveHint: true } as const;
+const WRITE = { destructiveHint: false } as const;
 
 export function buildMcpServer(ctx: Ctx): McpServer {
   const confirmNote = `Set confirm to the site name: "${ctx.siteName}".`;
@@ -85,6 +86,7 @@ export function buildMcpServer(ctx: Ctx): McpServer {
   }, ({ name }) => run(async () => ({ ...(await getCollection(ctx, name)) })));
 
   server.registerTool("create_collection", {
+    annotations: WRITE,
     description:
       "Create a collection (a content type). `kind` is \"list\" (many entries, default) or \"single\" (exactly one entry, e.g. site settings or a landing page). " +
       "Field types: text, textarea, markdown, number, boolean, datetime, select (needs options), image (media id), reference (needs collection), list (needs nested fields), json. " +
@@ -104,6 +106,7 @@ export function buildMcpServer(ctx: Ctx): McpServer {
   }, (args) => run(async () => ({ ...(await createCollection(ctx, args)) })));
 
   server.registerTool("update_collection", {
+    annotations: WRITE,
     description:
       "Update a collection's label, description, public flag or fields. Pass only what changes in `patch`. " +
       "`fields`, when present, replaces the whole field list, so call get_collection first and send the full list. The collection name cannot change.",
@@ -191,6 +194,7 @@ export function buildMcpServer(ctx: Ctx): McpServer {
   }));
 
   server.registerTool("create_entry", {
+    annotations: WRITE,
     description:
       "Create an entry in a collection. Before calling, call get_collection to see the fields and their descriptions. " +
       "Entries are created as drafts unless status is \"published\". Required fields are only enforced when publishing. " +
@@ -211,6 +215,7 @@ export function buildMcpServer(ctx: Ctx): McpServer {
   }));
 
   server.registerTool("update_entry", {
+    annotations: WRITE,
     description:
       "Update an entry. `data` is merged into the existing data: send only the fields you change (null clears a field). " +
       "Status is not changed here; use publish_entry / unpublish_entry. Call get_collection first if unsure about field names.",
@@ -240,6 +245,7 @@ export function buildMcpServer(ctx: Ctx): McpServer {
     ["unpublish_entry", unpublishEntry, "Turn a published entry back into a draft (it is no longer publicly readable)."],
   ] as const) {
     server.registerTool(name, {
+      annotations: WRITE,
       description: verb,
       inputSchema: { collection: collectionName, id: entryId },
     }, ({ collection: c, id }) => run(async () => {
@@ -249,6 +255,7 @@ export function buildMcpServer(ctx: Ctx): McpServer {
   }
 
   server.registerTool("get_preview_url", {
+    annotations: WRITE,
     description:
       "Create a shareable preview link for an entry, including a draft. Anyone with the link can view the rendered page until it expires; no API key is needed. " +
       "Give this to the human so they can review a draft before you publish it.",
@@ -267,6 +274,7 @@ export function buildMcpServer(ctx: Ctx): McpServer {
   // --- media ---------------------------------------------------------------------------------------
 
   server.registerTool("upload_media", {
+    annotations: WRITE,
     description:
       "Upload a file (image etc., max 20MB) to the media library. Provide exactly one source: `url` (the server downloads it) or `base64` (with `filename`). " +
       "Returns the media object; use its `id` in an image field of an entry.",
@@ -321,6 +329,7 @@ export function buildMcpServer(ctx: Ctx): McpServer {
   }, () => run(async () => ({ items: await listTrash(ctx) })));
 
   server.registerTool("restore_from_trash", {
+    annotations: WRITE,
     description: "Restore an item from the trash by its id (from list_trash). Restoring a collection also restores the entries that were trashed with it.",
     inputSchema: { id: z.string().describe("Id of the trashed entry (e_...), media (m_...) or collection (c_...).") },
   }, ({ id }) => run(async () => ({ ...(await restoreFromTrash(ctx, id)) })));
@@ -343,6 +352,7 @@ export function buildMcpServer(ctx: Ctx): McpServer {
   // --- keys ----------------------------------------------------------------------------------------
 
   server.registerTool("create_key", {
+    annotations: WRITE,
     description:
       "Create an API key. The plaintext key is returned once and cannot be shown again, so pass it to the human right away. " +
       "Use role \"read\" for keys that only read content (e.g. a website's server), \"admin\" for full access.",

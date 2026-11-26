@@ -752,3 +752,15 @@ it("テンプレート: 記事が見つからなければ data-empty を出す",
   await win.femtocms.refresh();
   expect(q(".fcms-empty").textContent).toBe("ありません");
 });
+
+it("テンプレート: ページ番号でも使え、ナビは .fcms-items のあとに出る", async () => {
+  setPageUrl("https://lp.test/list.html?page=2");
+  document.body.innerHTML = `<div data-femtocms="news" data-limit="2" data-pager="pages"><template><p class="t" data-field="title"></p></template></div>`;
+  mockPaged(5);
+  load();
+  await win.femtocms.refresh();
+  const root = q("[data-femtocms]");
+  expect([...root.children].map((c: any) => c.className)).toEqual(["fcms-items", "fcms-pager"]);
+  expect(qa("p.t").map((p) => p.textContent)).toEqual(["T2", "T3"]);
+  expect(q(".fcms-pager-current").textContent).toBe("2");
+});

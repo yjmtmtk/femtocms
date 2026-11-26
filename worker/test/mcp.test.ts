@@ -131,6 +131,17 @@ describe("ツール一覧", () => {
       expect(t.description, t.name).toBeTruthy();
     }
     const instructions = client.getInstructions()!;
+    expect(instructions).toMatch(/publishedAt,title.*data-fields/s);
+    const desc = (tool: string, p?: string) => {
+      const t = tools.find((x) => x.name === tool)!;
+      return p ? ((t.inputSchema.properties as Record<string, { description: string }>)[p]!.description) : t.description!;
+    };
+    // read keys: published entries of every collection (non-public included), never drafts
+    for (const d of [desc("create_key"), desc("create_key", "role")]) {
+      expect(d).toMatch(/published entries of any collection/);
+      expect(d).not.toMatch(/read drafts/);
+    }
+    expect(desc("upload_media", "mimeType")).toMatch(/base64 uploads only/);
     expect(instructions).toContain("list_collections");
     expect(instructions).toContain("get_preview_url");
     expect(instructions).toContain(`confirm = "${SITE}"`);

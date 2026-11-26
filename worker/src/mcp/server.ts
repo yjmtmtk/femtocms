@@ -51,6 +51,8 @@ function instructions(siteName: string): string {
     "3. get_preview_url to give the human a link to review the draft, then publish_entry when it is approved. unpublish_entry returns it to draft.",
     "4. list_entries returns published entries by default; pass status \"all\" or \"draft\" to see drafts.",
     "",
+    "The landing-page embed (embed.js) shows `publishedAt,title` by default, so name the headline field of a news-like collection `title` (otherwise the page must list its fields in data-fields).",
+    "",
     "Errors: a failed call has isError = true and a JSON body { error: { code, message, issues?, hint? } }. Read `issues` (path + message + expected) and `hint`, fix the input and retry.",
     "Deletes (delete_entry, delete_collection, delete_media) move items to the trash and can be undone with restore_from_trash.",
     `Destructive operations (delete_permanently, empty_trash, reset_site, import_data in replace mode) require confirm = "${siteName}".`,
@@ -283,7 +285,7 @@ export function buildMcpServer(ctx: Ctx): McpServer {
       url: z.string().optional().describe("Public http(s) URL of the file to import. Use this OR base64."),
       base64: z.string().optional().describe("File content as standard base64 (a data: URL is also accepted). Requires filename. Use this OR url."),
       filename: z.string().optional().describe("File name with extension (e.g. \"hero.png\"). Required with base64; optional with url (defaults to the URL's last path segment)."),
-      mimeType: z.string().optional().describe("MIME type, e.g. \"image/png\". Detected from the filename or response when omitted."),
+      mimeType: z.string().optional().describe("MIME type for base64 uploads only, e.g. \"image/png\" (detected from the filename when omitted). URL imports use the response's Content-Type, or the filename."),
       alt: z.string().optional().describe("Alternative text describing the image (accessibility)."),
     },
   }, ({ url, base64, filename, mimeType, alt }) => run(async () => {
@@ -365,10 +367,10 @@ export function buildMcpServer(ctx: Ctx): McpServer {
     annotations: WRITE,
     description:
       "Create an API key. The plaintext key is returned once and cannot be shown again, so pass it to the human right away. " +
-      "Use role \"read\" for keys that only read content (e.g. a website's server), \"admin\" for full access.",
+      "Use role \"read\" for keys that only read content (e.g. a website's server): a read key can read published entries of any collection, including non-public ones, but never drafts. Use \"admin\" for full access.",
     inputSchema: {
       name: z.string().describe("A label for the key, e.g. \"website\" or \"claude-desktop\"."),
-      role: z.enum(["admin", "read"]).describe("\"admin\" can do everything; \"read\" can read drafts and content but not change anything."),
+      role: z.enum(["admin", "read"]).describe("\"admin\" can do everything; \"read\" can read published entries of any collection (non-public ones included), but not drafts, and cannot change anything."),
     },
   }, (args) => run(async () => ({ ...(await createKey(ctx, args)) })));
 

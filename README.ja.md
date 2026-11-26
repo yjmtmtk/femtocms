@@ -149,7 +149,7 @@ femtocms は、管理画面のない CMS です。**自分の Cloudflare アカ�
 
 ベース: `https://<サイト>/api`。リクエストも応答も JSON です。現在のコレクション定義から自動生成した仕様（OpenAPI）を **`/api/openapi.json`** で配信しています。
 
-- 認証は `Authorization: Bearer <キー>`。**管理キー**（`fcms_admin_...`）はすべての操作ができ、**読み取りキー**（`fcms_read_...`）は非公開コレクションを読めます。
+- 認証は `Authorization: Bearer <キー>`。**管理キー**（`fcms_admin_...`）はすべての操作ができ、**読み取りキー**（`fcms_read_...`）は、非公開のものも含むすべてのコレクションの公開済みエントリを読めます（下書きは読めません）。
 - 公開コレクションの公開済みエントリは、キーなしで読めます。
 - コレクション: `GET/POST /api/collections`、`GET/PATCH/DELETE /api/collections/:name`
 - エントリ: `GET/POST /api/:collection`、`GET/PATCH/DELETE /api/:collection/:idOrSlug`、`POST /api/:collection/:id/publish`、`POST /api/:collection/:id/unpublish`、`POST /api/:collection/:id/preview`。`single` のコレクションは `GET/PUT /api/:collection` です。

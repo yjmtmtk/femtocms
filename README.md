@@ -149,7 +149,7 @@ Connection details are saved in `~/.config/femtocms/config.json` (mode 0600), on
 
 Base: `https://<your-site>/api`, JSON in and out. The machine-readable spec, generated from your current collections, is served at **`/api/openapi.json`**.
 
-- Authenticate with `Authorization: Bearer <key>`. An **admin key** (`fcms_admin_...`) can do everything. A **read key** (`fcms_read_...`) can read private collections.
+- Authenticate with `Authorization: Bearer <key>`. An **admin key** (`fcms_admin_...`) can do everything. A **read key** (`fcms_read_...`) can read the published entries of every collection, private ones included, but not drafts.
 - Published entries of public collections need no key.
 - Collections: `GET/POST /api/collections`, `GET/PATCH/DELETE /api/collections/:name`.
 - Entries: `GET/POST /api/:collection`, `GET/PATCH/DELETE /api/:collection/:idOrSlug`, `POST /api/:collection/:id/publish`, `POST /api/:collection/:id/unpublish`, `POST /api/:collection/:id/preview`. A `single` collection uses `GET/PUT /api/:collection`.

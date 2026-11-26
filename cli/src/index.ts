@@ -4,6 +4,7 @@ import { pathToFileURL } from "node:url";
 import { Command } from "commander";
 import { registerAdmin } from "./commands/admin";
 import { registerContent } from "./commands/content";
+import { registerDeploy } from "./commands/deploy";
 
 export function buildProgram(): Command {
   const program = new Command();
@@ -14,6 +15,7 @@ export function buildProgram(): Command {
     .option("--profile <name>", "使うプロファイル名");
   registerAdmin(program);
   registerContent(program);
+  registerDeploy(program);
   return program;
 }
 

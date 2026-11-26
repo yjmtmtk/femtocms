@@ -1,4 +1,6 @@
 import { Hono } from "hono";
+import { createCtx } from "./core/context";
+import { serveMedia } from "./core/media";
 import type { Env } from "./env";
 import { VERSION } from "./version";
 
@@ -15,5 +17,8 @@ app.get("/", (c) => {
     openapi: `${origin}/api/openapi.json`,
   });
 });
+
+// The filename segment is cosmetic (for humans and downloads); the id alone identifies the file.
+app.get("/media/:id/:filename?", (c) => serveMedia(createCtx(c.env, new URL(c.req.url).origin, "public"), c.req.param("id")));
 
 export default { fetch: app.fetch };

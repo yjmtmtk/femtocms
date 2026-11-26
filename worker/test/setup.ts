@@ -18,4 +18,11 @@ beforeEach(async () => {
   await env.DB.batch(
     ["entries", "media", "api_keys", "settings", "collections"].map((t) => env.DB.prepare(`DELETE FROM ${t}`)),
   );
+  // R2 is not isolated either: delete every object.
+  let cursor: string | undefined;
+  do {
+    const page = await env.MEDIA.list({ cursor });
+    if (page.objects.length) await env.MEDIA.delete(page.objects.map((o) => o.key));
+    cursor = page.truncated ? page.cursor : undefined;
+  } while (cursor);
 });

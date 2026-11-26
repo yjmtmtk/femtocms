@@ -535,20 +535,38 @@ describe("import", () => {
     expect(server.calls.map((c) => c.method)).toEqual(["PUT", "POST"]);
   });
 
+  const root = { name: "femtocms", site: "dev-site" };
+
   it("--replace は --confirm を mode と confirm に渡す", async () => {
     const d = makeDir([], {});
-    const r = recorder({ "POST /api/import": imported });
+    const r = recorder({ "GET /": root, "POST /api/import": imported });
     await importCmd(r.client, d, { replace: true, confirm: "dev-site" });
-    expect(r.calls[0]!.json).toMatchObject({ mode: "replace", confirm: "dev-site" });
+    expect(r.calls.at(-1)!.json).toMatchObject({ mode: "replace", confirm: "dev-site" });
+  });
+
+  it("--replace は GET / の site と confirm を照合し、違えばメディアの PUT も含めて何も書き込まない", async () => {
+    const d = makeDir([media("m_000000000001", "a.png")], { "m_000000000001-a.png": "x" });
+    const r = recorder({ "GET /": root, "PUT /api/media/m_000000000001": {}, "POST /api/import": imported });
+    await expect(importCmd(r.client, d, { replace: true, confirm: "wrong" })).rejects.toThrow(/dev-site/);
+    expect(writes(r.calls)).toEqual([]);
+    await importCmd(r.client, d, { replace: true, confirm: "dev-site" });
+    expect(r.calls.map((c) => `${c.method} ${c.path}`)).toEqual([
+      "GET /", "GET /", "PUT /api/media/m_000000000001", "POST /api/import",
+    ]);
   });
 
   it("--replace で --confirm が無く TTY でもなければ、リクエスト前にエラー。TTY ならプロンプト", async () => {
     const d = makeDir([media("m_000000000001", "a.png")], { "m_000000000001-a.png": "x" });
-    const r = recorder({ "PUT /api/media/m_000000000001": {}, "POST /api/import": imported });
+    const r = recorder({ "GET /": root, "PUT /api/media/m_000000000001": {}, "POST /api/import": imported });
     await expect(importCmd(r.client, d, { replace: true, isTTY: false })).rejects.toThrow("pass --confirm <site>");
     expect(r.calls).toEqual([]);
     await importCmd(r.client, d, { replace: true, isTTY: true, prompter: async () => "dev-site" });
     expect(r.calls.at(-1)!.json.confirm).toBe("dev-site");
+  });
+
+  it("import のヘルプは、マージでもメディアのファイルを import の呼び出しより先に送ると書く", () => {
+    const cmd = buildProgram().commands.find((c) => c.name() === "import")!;
+    expect(cmd.helpInformation()).toMatch(/検証より先/);
   });
 
   it("data.json が無い・壊れているときは分かるエラー", async () => {

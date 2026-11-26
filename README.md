@@ -210,6 +210,8 @@ npx femtocms import ./backup --replace --confirm <site name>   # move existing d
 
 Entry and media ids are preserved, so references and image URLs keep working in the new deployment. API keys are never exported or imported.
 
+`import` first uploads the files in `media/` (`PUT /api/media/<id>`) and then sends `data.json`, which the server validates as a whole before writing anything to D1. If that validation fails, the uploaded files stay behind under their ids; running the import again overwrites them. With `--replace`, the CLI checks `--confirm` against the site name (`GET /` → `site`) before uploading anything.
+
 ## Upgrade
 
 ```sh

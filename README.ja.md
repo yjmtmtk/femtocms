@@ -210,6 +210,8 @@ npx femtocms import ./backup --replace --confirm <サイト名>   # 既存のデ
 
 エントリとメディアの id は保たれるので、参照や画像の URL は移行先でもそのまま使えます。API キーは export にも import にも含まれません。
 
+`import` は、まず `media/` のファイルを送り（`PUT /api/media/<id>`）、そのあとで `data.json` を送ります。サーバは D1 に書き込む前に `data.json` 全体を検証します。検証に失敗した場合、送ったファイルはその id のまま残りますが、もう一度 import すれば上書きされます。`--replace` のときは、何かを送る前に CLI が `--confirm` の値をサイト名（`GET /` の `site`）と照合します。
+
 ## アップグレード
 
 ```sh

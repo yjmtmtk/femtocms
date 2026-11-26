@@ -134,6 +134,16 @@ export async function exportCmd(client: FemtoClient, opts: ExportOpts): Promise<
 
 export interface ImportOpts extends ConfirmOpts { replace?: boolean }
 
+/** `GET /` reports the site name as `site` (the Worker's SITE_NAME, i.e. the init --name). */
+async function assertSiteName(client: FemtoClient, confirm: string): Promise<void> {
+  const root = await client.request<{ site?: unknown }>("GET", "/");
+  if (root?.site !== confirm) {
+    throw new Error(
+      `--confirm の値 "${confirm}" がサイト名と一致しません（サイト名は "${String(root?.site)}"。femtocms init の --name で、GET / の site で確認できます）。何も書き込んでいません`,
+    );
+  }
+}
+
 export async function importCmd(client: FemtoClient, dir: string, opts: ImportOpts): Promise<unknown> {
   const dataPath = join(dir, "data.json");
   let text: string;
@@ -150,6 +160,8 @@ export async function importCmd(client: FemtoClient, dir: string, opts: ImportOp
   }
   // Ask first: a refusal must happen before any request (media PUTs included).
   const confirm = opts.replace ? await resolveConfirm(opts, "既存のデータをすべてゴミ箱へ移して置き換えます。") : undefined;
+  // The server checks confirm only in POST /api/import, after the media PUTs: check it against GET / first so a typo writes nothing.
+  if (confirm !== undefined) await assertSiteName(client, confirm);
 
   let localFiles: string[];
   try {
@@ -308,7 +320,10 @@ export function registerAdmin(program: Command): void {
 
   program
     .command("import <dir>")
-    .description("export のフォルダから取り込む（media/ のファイルを先に送ります）")
+    .description(
+      "export のフォルダから取り込む。media/ のファイルは、マージでも取り込みデータの検証より先に PUT /api/media/<id> で送ります" +
+        "（検証で失敗するとファイルだけが残りますが、同じ id で再実行すれば上書きされます）",
+    )
     .option("--replace", "既存のデータをゴミ箱へ移して置き換える（サイト名の確認が必要）")
     .option("--confirm <site>", "--replace のためのサイト名（省略時、対話端末なら入力を促します）")
     .action(

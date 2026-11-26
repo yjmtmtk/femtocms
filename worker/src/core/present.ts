@@ -47,8 +47,9 @@ const own = (data: Record<string, unknown>, name: string): unknown => (Object.ha
 function collectMediaIds(fields: FieldDef[], data: Record<string, unknown>, into: Set<string>): void {
   for (const f of fields) {
     const v = own(data, f.name);
-    if (f.type === "image" && isMediaId(v)) into.add(v);
-    else if (f.type === "list" && Array.isArray(v)) {
+    if (f.type === "image") {
+      for (const x of Array.isArray(v) ? v : [v]) if (isMediaId(x)) into.add(x);
+    } else if (f.type === "list" && Array.isArray(v)) {
       for (const item of v) if (isObject(item)) collectMediaIds(f.fields ?? [], item, into);
     }
   }
@@ -60,7 +61,10 @@ function shapeData(fields: FieldDef[], data: Record<string, unknown>, media: Med
   for (const f of fields) {
     if (!Object.hasOwn(data, f.name)) continue;
     const v = data[f.name];
-    if (f.type === "image" && isMediaId(v)) out[f.name] = media.get(v) ?? null;
+    if (f.type === "image" && f.multiple === true && Array.isArray(v)) {
+      // Missing / trashed elements are removed from the array (not null); non-id legacy values pass through.
+      out[f.name] = v.flatMap((x) => (isMediaId(x) ? (media.get(x) ?? []) : [x]));
+    } else if (f.type === "image" && isMediaId(v)) out[f.name] = media.get(v) ?? null;
     else if (f.type === "list" && Array.isArray(v)) {
       out[f.name] = v.map((item) => (isObject(item) ? shapeData(f.fields ?? [], item, media) : item));
     } else out[f.name] = v;
@@ -80,6 +84,12 @@ function shapeEntry(
     if (f.type === "markdown" && typeof v === "string") html[f.name] = renderMarkdown(v);
     if (f.type === "reference" && typeof v === "string" && expanded.has(`${f.name}\0${v}`)) {
       data[f.name] = expanded.get(`${f.name}\0${v}`);
+    } else if (f.type === "reference" && f.multiple === true && Array.isArray(v)) {
+      // Only expanded fields have entries in `expanded`; unreadable / missing / trashed elements are removed from the array.
+      const key = (x: unknown) => `${f.name}\0${x}`;
+      if (v.some((x) => typeof x === "string" && expanded.has(key(x)))) {
+        data[f.name] = v.flatMap((x) => (typeof x === "string" && expanded.has(key(x)) ? (expanded.get(key(x)) ?? []) : [x]));
+      }
     }
   }
   return {
@@ -113,7 +123,7 @@ async function loadExpanded(
   for (const r of records) {
     for (const f of wanted) {
       const v = own(r.data, f.name);
-      if (typeof v === "string") keys.set(`${f.name}\0${v}`, { field: f, id: v });
+      for (const id of Array.isArray(v) ? v : [v]) if (typeof id === "string") keys.set(`${f.name}\0${id}`, { field: f, id });
     }
   }
   const refs = new Map<string, { collection: Collection; record: EntryRecord } | null>();

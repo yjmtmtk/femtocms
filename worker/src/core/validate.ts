@@ -103,25 +103,35 @@ function idOf(v: unknown): unknown {
   return isObject(v) ? v.id : v;
 }
 
-const image: Checker = (_f, v, path, w) => {
-  const id = idOf(v);
-  if (typeof id !== "string" || !MEDIA_ID_RE.test(id)) {
-    return fail(w, path, "must be a media id", imageExpected(), v);
-  }
-  if (!w.refs.media.includes(id)) w.refs.media.push(id);
-  (w.refs.paths.media[id] ??= []).push(path);
-  return id;
+// `multiple` image / reference fields take an array of ids (duplicates and order kept); `[]` is valid.
+// Element issues point at `path[i]`; any bad element makes the whole value undefined.
+function many(v: unknown, path: string, w: Walk, expected: string, one: (x: unknown, p: string) => string | undefined): unknown {
+  if (!Array.isArray(v)) return fail(w, path, "must be an array", `array of ${expected}`, v);
+  const out = v.map((x, i) => one(x, `${path}[${i}]`));
+  return out.every(x => x !== undefined) ? out : undefined;
+}
+
+const image: Checker = (f, v, path, w) => {
+  const one = (x: unknown, p: string): string | undefined => {
+    const id = idOf(x);
+    if (typeof id !== "string" || !MEDIA_ID_RE.test(id)) return fail(w, p, "must be a media id", imageExpected(), x);
+    if (!w.refs.media.includes(id)) w.refs.media.push(id);
+    (w.refs.paths.media[id] ??= []).push(p);
+    return id;
+  };
+  return f.multiple === true ? many(v, path, w, imageExpected(), one) : one(v, path);
 };
 
 const reference: Checker = (f, v, path, w) => {
-  const id = idOf(v);
-  if (typeof id !== "string" || !ENTRY_ID_RE.test(id)) {
-    return fail(w, path, "must be an entry id", referenceExpected(f), v);
-  }
   const collection = f.collection ?? "";
-  if (!w.refs.entries.some(e => e.collection === collection && e.id === id)) w.refs.entries.push({ collection, id });
-  (w.refs.paths.entries[`${collection}/${id}`] ??= []).push(path);
-  return id;
+  const one = (x: unknown, p: string): string | undefined => {
+    const id = idOf(x);
+    if (typeof id !== "string" || !ENTRY_ID_RE.test(id)) return fail(w, p, "must be an entry id", referenceExpected(f), x);
+    if (!w.refs.entries.some(e => e.collection === collection && e.id === id)) w.refs.entries.push({ collection, id });
+    (w.refs.paths.entries[`${collection}/${id}`] ??= []).push(p);
+    return id;
+  };
+  return f.multiple === true ? many(v, path, w, referenceExpected(f), one) : one(v, path);
 };
 
 const list: Checker = (f, v, path, w) => {
@@ -182,8 +192,8 @@ function expectedOf(f: FieldDef): string {
     case "boolean": return "boolean (true or false)";
     case "datetime": return DATETIME_EXPECTED;
     case "select": return f.multiple ? `array of ${selectExpected(f)}` : selectExpected(f);
-    case "image": return imageExpected();
-    case "reference": return referenceExpected(f);
+    case "image": return f.multiple === true ? `array of ${imageExpected()}` : imageExpected();
+    case "reference": return f.multiple === true ? `array of ${referenceExpected(f)}` : referenceExpected(f);
     case "list": return listExpected(f);
     case "json": return "any JSON value";
   }

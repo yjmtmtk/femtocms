@@ -108,6 +108,16 @@ describe("exportData", () => {
       const dump = await roundTrip();
       expect(dump.entries[0].data).toEqual({ items: [{ img: media.id, t: "1" }, { t: "2" }] });
     });
+    it("multiple の gallery は宙に浮いた要素だけを落とし、配列は残す", async () => {
+      const a = await uploadMedia(admin(), { bytes: fixtures.png, filename: "a.png" });
+      const b = await uploadMedia(admin(), { bytes: fixtures.png, filename: "b.png" });
+      await createCollection(admin(), { name: "album", fields: [{ name: "gallery", type: "image", multiple: true }] });
+      const e = await createEntry(admin(), "album", { data: { gallery: [a.id, b.id] } });
+      await trashMedia(admin(), b.id);
+      const dump = await roundTrip();
+      expect(dump.entries[0].data).toEqual({ gallery: [a.id] });
+      expect((await getEntryRecord(admin(), "album", e.id)).data).toEqual({ gallery: [a.id] });
+    });
     it("公開後に required のフィールドを足しても戻せる", async () => {
       const { entry } = await seed();
       await updateCollection(admin(), "news", { fields: [...newsDef.fields, { name: "subtitle", type: "text", required: true }] });

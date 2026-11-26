@@ -96,6 +96,46 @@ describe("validateData", () => {
     ]);
   });
 
+  it("image multiple: id / { id } の配列を id 文字列に正規化し、各要素を refs に集める", () => {
+    const fields: FieldDef[] = [{ name: "gallery", type: "image", multiple: true }];
+    const r = validateData(fields, { gallery: ["m_aaaaaaaaaaaa", { id: "m_bbbbbbbbbbbb" }, "m_aaaaaaaaaaaa"] }, { enforceRequired: true });
+    expect(r.issues).toEqual([]);
+    expect(r.data.gallery).toEqual(["m_aaaaaaaaaaaa", "m_bbbbbbbbbbbb", "m_aaaaaaaaaaaa"]);
+    expect(r.refs.media).toEqual(["m_aaaaaaaaaaaa", "m_bbbbbbbbbbbb"]);
+    expect(r.refs.paths.media).toEqual({
+      m_aaaaaaaaaaaa: ["data.gallery[0]", "data.gallery[2]"], m_bbbbbbbbbbbb: ["data.gallery[1]"],
+    });
+    expect(validateData(fields, { gallery: [] }, { enforceRequired: true }).data.gallery).toEqual([]);
+  });
+  it("image multiple: 配列でない値と不正な要素を報告し、multiple でない image は配列を拒否する", () => {
+    const fields: FieldDef[] = [{ name: "gallery", type: "image", multiple: true }];
+    const notArray = validateData(fields, { gallery: "m_aaaaaaaaaaaa" }, { enforceRequired: false });
+    expect(notArray.issues).toEqual([expect.objectContaining({ path: "data.gallery", expected: expect.stringContaining("array") })]);
+    const bad = validateData(fields, { gallery: ["m_aaaaaaaaaaaa", "nope"] }, { enforceRequired: false });
+    expect(bad.issues).toEqual([expect.objectContaining({ path: "data.gallery[1]", expected: expect.stringContaining("m_") })]);
+    expect(bad.data).not.toHaveProperty("gallery");
+    const single = validateData([{ name: "cover", type: "image" }], { cover: ["m_aaaaaaaaaaaa"] }, { enforceRequired: false });
+    expect(single.issues).toEqual([expect.objectContaining({ path: "data.cover" })]);
+  });
+  it("reference multiple: 配列を検証し、list の中も含めて refs と path を集め、[] は required で未入力扱い", () => {
+    const fields: FieldDef[] = [
+      { name: "related", type: "reference", collection: "news", multiple: true, required: true },
+      { name: "faq", type: "list", fields: [{ name: "images", type: "image", multiple: true }] },
+    ];
+    const r = validateData(fields, {
+      related: ["e_aaaaaaaaaaaa", { id: "e_bbbbbbbbbbbb" }],
+      faq: [{ images: [] }, { images: ["m_cccccccccccc"] }],
+    }, { enforceRequired: true });
+    expect(r.issues).toEqual([]);
+    expect(r.data.related).toEqual(["e_aaaaaaaaaaaa", "e_bbbbbbbbbbbb"]);
+    expect(r.refs.paths.entries).toEqual({ "news/e_aaaaaaaaaaaa": ["data.related[0]"], "news/e_bbbbbbbbbbbb": ["data.related[1]"] });
+    expect(r.refs.paths.media).toEqual({ m_cccccccccccc: ["data.faq[1].images[0]"] });
+    const empty = validateData(fields, { related: [] }, { enforceRequired: true });
+    expect(empty.issues).toEqual([expect.objectContaining({ path: "data.related", message: "required" })]);
+    const badEl = validateData(fields, { related: ["e_aaaaaaaaaaaa", 5] }, { enforceRequired: false });
+    expect(badEl.issues).toEqual([expect.objectContaining({ path: "data.related[1]" })]);
+  });
+
   it("select multiple・json・default の扱い", () => {
     const fields: FieldDef[] = [
       { name: "tags", type: "select", options: ["a", "b"], multiple: true },

@@ -56,14 +56,30 @@ function exportableData(fields: FieldDef[], data: Record<string, unknown>, targe
       }
       continue;
     }
-    const r = validateData([f], { [f.name]: v }, { enforceRequired: false, ignoreUnknown: true, applyDefaults: false });
-    if (r.issues.length) continue;
-    const dangling =
-      r.refs.media.some((id) => !targets.media.has(id)) ||
-      r.refs.entries.some((e) => targets.entries.get(e.id) !== e.collection);
-    if (!dangling) out[f.name] = r.data[f.name];
+    if (f.multiple === true && (f.type === "image" || f.type === "reference")) {
+      // Keep the array; drop only the dangling / invalid elements (possibly leaving []).
+      if (!Array.isArray(v)) continue;
+      const one: FieldDef = { ...f, multiple: false };
+      out[f.name] = v.flatMap((x) => {
+        const kept = exportableValue(one, x, targets);
+        return kept === undefined ? [] : [kept];
+      });
+      continue;
+    }
+    const kept = exportableValue(f, v, targets);
+    if (kept !== undefined) out[f.name] = kept;
   }
   return out;
+}
+
+/** The normalized value when it is valid for `f` and points only at things in the export; otherwise undefined. */
+function exportableValue(f: FieldDef, v: unknown, targets: Targets): unknown {
+  const r = validateData([f], { [f.name]: v }, { enforceRequired: false, ignoreUnknown: true, applyDefaults: false });
+  if (r.issues.length) return undefined;
+  const dangling =
+    r.refs.media.some((id) => !targets.media.has(id)) ||
+    r.refs.entries.some((e) => targets.entries.get(e.id) !== e.collection);
+  return dangling ? undefined : r.data[f.name];
 }
 
 /** Everything except the trash, `settings` and `api_keys`. Entry data is the stored value (media / references stay ids) cleaned by exportableData so it always re-imports. */

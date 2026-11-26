@@ -102,6 +102,16 @@ describe("presentEntries", () => {
     expect(b.data.cover).toBeNull();
     expect(c.data.cover).toBe(5);
   });
+  it("multiple の画像: ゴミ箱・不存在の要素は配列から除き、id でない古い値はそのまま", async () => {
+    await insertMedia("m_aaaaaaaaaaaa");
+    await insertMedia("m_bbbbbbbbbbbb", { deleted: true });
+    const c: Collection = { ...news, fields: [{ name: "gallery", type: "image", multiple: true }] };
+    const [a, b] = await presentEntries(admin(), c, [
+      rec({ gallery: ["m_bbbbbbbbbbbb", "m_aaaaaaaaaaaa", "m_cccccccccccc"] }), rec({ gallery: ["m_aaaaaaaaaaaa", "legacy"] }),
+    ], {});
+    expect(a.data.gallery).toEqual([expect.objectContaining({ id: "m_aaaaaaaaaaaa" })]);
+    expect(b.data.gallery).toEqual([expect.objectContaining({ id: "m_aaaaaaaaaaaa" }), "legacy"]);
+  });
   it("id の形でない古い画像値はそのまま返し、問い合わせない", async () => {
     const [e] = await presentEntries(admin(), withCover, [rec({ cover: "legacy-string" })], {});
     expect(e.data.cover).toBe("legacy-string");
@@ -189,6 +199,16 @@ describe("参照の展開", () => {
     expect((await presentEntries(pub(), post, [r], { expand: ["author"] }))[0].data.author).toBeNull();
     expect((await presentEntries(reader(), post, [r], { expand: ["author"] }))[0].data.author).toBeNull();
     expect((await presentEntries(admin(), post, [r], { expand: ["author"] }))[0].data.author).toMatchObject({ id: draft.id });
+  });
+  it("multiple の参照: 既定は id の配列、expand では読めない要素（下書きなど）を配列から除く", async () => {
+    const multi: Collection = { ...post, fields: [{ name: "authors", type: "reference", collection: "authors", multiple: true }] };
+    const draft = await createEntry(admin(), "authors", { data: { name: "下書き" } });
+    const r = postRec({ authors: [draft.id, author.id, "e_nonexistent0"] });
+    expect((await presentEntries(pub(), multi, [r], {}))[0].data.authors).toEqual([draft.id, author.id, "e_nonexistent0"]);
+    expect((await presentEntries(pub(), multi, [r], { expand: ["authors"] }))[0].data.authors)
+      .toEqual([expect.objectContaining({ id: author.id, data: expect.objectContaining({ name: "山田" }) })]);
+    expect((await presentEntries(admin(), multi, [r], { expand: ["authors"] }))[0].data.authors)
+      .toEqual([expect.objectContaining({ id: draft.id }), expect.objectContaining({ id: author.id })]);
   });
   it("ゴミ箱・不存在の参照先は null", async () => {
     await env.DB.prepare("UPDATE entries SET deleted_at = 'now' WHERE id = ?").bind(author.id).run();

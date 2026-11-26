@@ -145,7 +145,15 @@ describe("検証", () => {
     await expect(createEntry(admin(), "posts", { data: { author: au.id } })).rejects.toMatchObject({
       code: "validation_failed", issues: [expect.objectContaining({ path: "data.author" })] });
   });
-  it("存在しないコレクションは not_found", async () => {
+  it("multiple の image: 存在しない id は data.gallery[i] の issue になる", async () => {
+  await insertMedia("m_aaaaaaaaaaaa");
+  await createCollection(admin(), { name: "albums", fields: [{ name: "gallery", type: "image", multiple: true }] });
+  const ok = await createEntry(admin(), "albums", { data: { gallery: ["m_aaaaaaaaaaaa", { id: "m_aaaaaaaaaaaa" }] } });
+  expect(ok.data).toEqual({ gallery: ["m_aaaaaaaaaaaa", "m_aaaaaaaaaaaa"] });
+  await expect(createEntry(admin(), "albums", { data: { gallery: ["m_aaaaaaaaaaaa", "m_000000000000"] } })).rejects.toMatchObject({
+    code: "validation_failed", issues: [expect.objectContaining({ path: "data.gallery[1]" })] });
+});
+it("存在しないコレクションは not_found", async () => {
     await expect(createEntry(admin(), "nope", { data: {} })).rejects.toMatchObject({ code: "not_found" });
   });
 });

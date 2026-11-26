@@ -18,6 +18,11 @@ beforeEach(async () => {
   await env.DB.batch(
     ["entries", "media", "api_keys", "settings", "collections"].map((t) => env.DB.prepare(`DELETE FROM ${t}`)),
   );
+  // The Cache API is not isolated either, and wiping settings restarts content_version at 1, which would revive
+  // edge-cache entries from earlier tests (same URL + same version). Start each test from a distinct version.
+  await env.DB.prepare("INSERT INTO settings (key, value) VALUES ('content_version', ?)")
+    .bind(String(Math.floor(Math.random() * 1e9) + 1))
+    .run();
   // R2 is not isolated either: delete every object.
   let cursor: string | undefined;
   do {

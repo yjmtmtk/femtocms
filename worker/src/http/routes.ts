@@ -16,6 +16,7 @@ import { exportData, importData, resetSite, type ExportData } from "../core/tran
 import { deletePermanently, emptyTrash, listTrash, restoreFromTrash, trashCollection, trashEntry, trashMedia } from "../core/trash";
 import type { Status } from "../core/types";
 import type { AuthEnv } from "./auth";
+import { withPublicCache } from "./cache";
 import { errorResponse } from "./errors";
 
 type C = Context<AuthEnv>;
@@ -82,7 +83,8 @@ export const api = new Hono<AuthEnv>();
 
 api.get("/collections", async (c) => c.json({ items: await listCollections(c.get("ctx")) }));
 api.post("/collections", async (c) => c.json(await createCollection(c.get("ctx"), await jsonObject(c)), 201));
-api.get("/collections/:name", async (c) => c.json(await getCollection(c.get("ctx"), c.req.param("name"))));
+api.get("/collections/:name", (c) =>
+  withPublicCache(c, c.get("ctx"), () => getCollection(c.get("ctx"), c.req.param("name"))));
 api.patch("/collections/:name", async (c) =>
   c.json(await updateCollection(c.get("ctx"), c.req.param("name"), await jsonObject(c))));
 api.delete("/collections/:name", async (c) => {
@@ -215,13 +217,15 @@ api.get("/:c", async (c) => {
   const ctx = c.get("ctx");
   const name = c.req.param("c");
   const params = parseListParams(query(c));
-  const collection = await getCollection(ctx, name);
-  const opts = { fields: params.fields, expand: params.expand };
-  if (collection.kind === "single") {
-    return c.json(await presentEntry(ctx, collection, await getSingle(ctx, name), opts));
-  }
-  const page = await listEntryRecords(ctx, name, params);
-  return c.json({ ...page, items: await presentEntries(ctx, collection, page.items, opts) });
+  return withPublicCache(c, ctx, async () => {
+    const collection = await getCollection(ctx, name);
+    const opts = { fields: params.fields, expand: params.expand };
+    if (collection.kind === "single") {
+      return presentEntry(ctx, collection, await getSingle(ctx, name), opts);
+    }
+    const page = await listEntryRecords(ctx, name, params);
+    return { ...page, items: await presentEntries(ctx, collection, page.items, opts) };
+  });
 });
 
 api.post("/:c", async (c) => {
@@ -262,8 +266,10 @@ api.get("/:c/:id", async (c) => {
       return res;
     }
   }
-  const record = await getEntryRecord(ctx, name, c.req.param("id"));
-  return c.json(await presentEntry(ctx, await getCollection(ctx, name), record, { fields: params.fields, expand: params.expand }));
+  return withPublicCache(c, ctx, async () => {
+    const record = await getEntryRecord(ctx, name, c.req.param("id"));
+    return presentEntry(ctx, await getCollection(ctx, name), record, { fields: params.fields, expand: params.expand });
+  });
 });
 
 api.patch("/:c/:id", async (c) => {

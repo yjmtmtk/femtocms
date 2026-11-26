@@ -251,6 +251,41 @@ Names can also be `id`, `slug`, `status`, `publishedAt`, `createdAt` and `update
 
 Copies go into `<ul class="fcms-items">` when the template's content is an `<li>`, otherwise into `<div class="fcms-items">`; put grid or other layout rules on `.fcms-items`. With a template, the element's `data-fields`, `data-href` and `data-heading` are not used; paging, "load more", `data-filter`, `data-empty` and `data-document-title` work as usual. Values always go in as text, so HTML inside your data is shown as-is and never interpreted.
 
+#### Pager template
+
+A list with `data-pager` can hold a second template, `<template data-pager>`. It replaces the built-in pager and is placed below the list inside `<div class="fcms-pager-custom">`. It uses the same `data-field`, `data-if`, `data-class` and `<template data-each>` as the entry template, plus `data-page` for links and `data-more` for the button.
+
+```html
+<div data-femtocms="news" data-limit="10" data-pager="pages">
+  <template> …one entry… </template>
+  <template data-pager>
+    <nav class="pager">
+      <a data-page="prev">←</a>
+      <template data-each="pages">
+        <span data-if="gap">…</span>
+        <a data-if="!gap" data-page data-field="number" data-class="current"></a>
+      </template>
+      <a data-page="next">→</a>
+      <p><span data-field="total"></span> items</p>
+    </nav>
+  </template>
+</div>
+
+<div data-femtocms="news" data-limit="6" data-pager="more">
+  <template> …one entry… </template>
+  <template data-pager>
+    <button data-more>Load more (<span data-field="remaining"></span> left)</button>
+  </template>
+</div>
+```
+
+| Values | |
+|---|---|
+| with `pages` | `current` (this page), `totalPages`, `total` (all items), `hasPrev`, `hasNext`, `pages` (the page numbers to show; each has `number`, `current` and `gap`) |
+| with `more` | `loaded` (items shown), `total`, `remaining` |
+
+`data-page="prev"`, `"next"`, `"first"`, `"last"`, and a bare `data-page` inside `data-each="pages"`, get the link to that page (keeping the page URL's other parameters). When there is no previous or next page, the `href` is removed and `aria-disabled="true"` is set, so CSS can dim or hide it. The link to the current page gets `aria-current="page"`. Clicking an element with `data-more` loads the next batch (a link does not navigate); it is `disabled` while loading, and the whole pager is removed once everything is shown. Nothing is shown when everything fits on one page.
+
 ## Caching
 
 - **workers.dev (default):** public reads get `Cache-Control: public, max-age=60` and an `ETag` (so conditional requests return 304). With only a few entries, reading D1 on every request is fast enough.

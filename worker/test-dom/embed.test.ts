@@ -764,3 +764,111 @@ it("テンプレート: ページ番号でも使え、ナビは .fcms-items の�
   expect(qa("p.t").map((p) => p.textContent)).toEqual(["T2", "T3"]);
   expect(q(".fcms-pager-current").textContent).toBe("2");
 });
+
+// ---- ページ送りのテンプレート: <template data-pager> ----
+
+const PAGES_TPL = `<template data-pager>
+  <nav class="my">
+    <a class="first" data-page="first">«</a><a class="prev" data-page="prev">‹</a>
+    <template data-each="pages"><span class="gap" data-if="gap">…</span><a class="num" data-if="!gap" data-page data-field="number" data-class="current"></a></template>
+    <a class="next" data-page="next">›</a><a class="last" data-page="last">»</a>
+    <span class="info"><span class="cur" data-field="current"></span>/<span class="tp" data-field="totalPages"></span>（<span class="tot" data-field="total"></span>件）</span>
+    <b class="hp" data-if="hasPrev">p</b><b class="hn" data-if="hasNext">n</b>
+  </nav>
+</template>`;
+
+it("ページ送りテンプレート: ページ番号を自分の HTML で出し、リンク先はほかの URL パラメータを残す", async () => {
+  setPageUrl("https://lp.test/list.html?page=2&x=1");
+  document.body.innerHTML = `<div data-femtocms="news" data-limit="2" data-pager="pages"><template><p class="t" data-field="title"></p></template>${PAGES_TPL}</div>`;
+  mockPaged(9);
+  load();
+  await win.femtocms.refresh();
+  const root = q("[data-femtocms]");
+  expect([...root.children].map((c: any) => c.className)).toEqual(["fcms-items", "fcms-pager-custom"]);
+  expect(q(".fcms-pager")).toBeNull();
+  expect(qa("p.t").map((p) => p.textContent)).toEqual(["T2", "T3"]);
+  expect(q(".prev").getAttribute("href")).toBe("?page=1&x=1");
+  expect(q(".next").getAttribute("href")).toBe("?page=3&x=1");
+  expect(q(".first").getAttribute("href")).toBe("?page=1&x=1");
+  expect(q(".last").getAttribute("href")).toBe("?page=5&x=1");
+  const nums = qa("a.num");
+  expect(nums.map((a) => a.textContent)).toEqual(["1", "2", "3", "4", "5"]);
+  expect(nums.map((a) => a.getAttribute("href"))).toEqual(["?page=1&x=1", "?page=2&x=1", "?page=3&x=1", "?page=4&x=1", "?page=5&x=1"]);
+  expect(nums[1].classList.contains("current")).toBe(true);
+  expect(nums[1].getAttribute("aria-current")).toBe("page");
+  expect(nums[0].classList.contains("current")).toBe(false);
+  expect(nums[0].hasAttribute("aria-current")).toBe(false);
+  expect(q(".info").textContent).toBe("2/5（9件）");
+  expect(q(".hp")).not.toBeNull();
+  expect(q(".hn")).not.toBeNull();
+  expect(q(".gap")).toBeNull();
+  expect(q("template")).toBeNull();
+});
+
+it("ページ送りテンプレート: 前後がなければリンクを外して aria-disabled を付け、多いときは … を出す", async () => {
+  setPageUrl("https://lp.test/list.html");
+  document.body.innerHTML = `<div data-femtocms="news" data-limit="2" data-pager="pages" data-page-param="p">${PAGES_TPL}</div>`;
+  mockPaged(40);
+  load();
+  await win.femtocms.refresh();
+  expect(q("ul.fcms-list")).not.toBeNull();
+  expect(q(".prev").hasAttribute("href")).toBe(false);
+  expect(q(".prev").getAttribute("aria-disabled")).toBe("true");
+  expect(q(".next").getAttribute("href")).toBe("?p=2");
+  expect(q(".next").hasAttribute("aria-disabled")).toBe(false);
+  expect(q(".hp")).toBeNull();
+  expect(qa("a.num").map((a) => a.textContent)).toEqual(["1", "2", "20"]);
+  expect(qa(".gap").length).toBe(1);
+
+  setPageUrl("https://lp.test/list.html?p=20");
+  await win.femtocms.refresh();
+  expect(q(".next").hasAttribute("href")).toBe(false);
+  expect(q(".next").getAttribute("aria-disabled")).toBe("true");
+  expect(q(".hn")).toBeNull();
+  expect(qa(".fcms-pager-custom").length).toBe(1);
+});
+
+it("ページ送りテンプレート: 1ページに収まるときは出さない", async () => {
+  setPageUrl("https://lp.test/list.html");
+  document.body.innerHTML = `<div data-femtocms="news" data-limit="5" data-pager="pages">${PAGES_TPL}</div>`;
+  mockPaged(3);
+  load();
+  await win.femtocms.refresh();
+  expect(q(".fcms-pager-custom")).toBeNull();
+  expect(q("nav")).toBeNull();
+});
+
+it("ページ送りテンプレート: data-more のボタンで追加し、残り件数を更新し、読み込み中は押せず、全部出たら消える", async () => {
+  setPageUrl("https://lp.test/");
+  document.body.innerHTML = `<div data-femtocms="news" data-limit="2" data-pager="more">
+    <template><p class="t" data-field="title"></p></template>
+    <template data-pager><div class="box"><button class="mine" data-more>残り<span class="rem" data-field="remaining"></span>件（<span class="ld" data-field="loaded"></span>/<span class="tt" data-field="total"></span>）</button></div></template>
+  </div>`;
+  mockPaged(5);
+  load();
+  await win.femtocms.refresh();
+  expect(q(".fcms-more")).toBeNull();
+  expect(q("button.mine").textContent).toBe("残り3件（2/5）");
+  q("button.mine").click();
+  expect(q("button.mine").hasAttribute("disabled")).toBe(true);
+  await vi.waitFor(() => expect(qa("p.t").length).toBe(4));
+  expect(q("button.mine").hasAttribute("disabled")).toBe(false);
+  expect(q("button.mine").textContent).toBe("残り1件（4/5）");
+  expect(qa(".fcms-pager-custom").length).toBe(1);
+  q("button.mine").click();
+  await vi.waitFor(() => expect(qa("p.t").length).toBe(5));
+  expect(q(".fcms-pager-custom")).toBeNull();
+  expect(q("button.mine")).toBeNull();
+});
+
+it("ページ送りテンプレート: data-more がリンクでもページ移動せずに追加する", async () => {
+  setPageUrl("https://lp.test/");
+  document.body.innerHTML = `<div data-femtocms="news" data-limit="2" data-pager="more"><template data-pager><a class="m" href="#more" data-more>more</a></template></div>`;
+  mockPaged(3);
+  load();
+  await win.femtocms.refresh();
+  const ev = new win.MouseEvent("click", { bubbles: true, cancelable: true });
+  q("a.m").dispatchEvent(ev);
+  expect(ev.defaultPrevented).toBe(true);
+  await vi.waitFor(() => expect(qa(".fcms-title").length).toBe(3));
+});

@@ -1,5 +1,6 @@
 /* femtocms embed: renders a list into every [data-femtocms] element and one entry into every [data-femtocms-entry] element.
-   A <template> child replaces the built-in markup (data-field / data-if / data-class / data-href / data-each). No dependencies. */
+   A <template> child replaces the built-in markup (data-field / data-if / data-class / data-href / data-each), and a
+   <template data-pager> child replaces the built-in pager (data-page / data-more). No dependencies. */
 (function () {
   "use strict";
   if (window.femtocms) return;
@@ -170,16 +171,25 @@
   var ENTRY_ID_RE = /^e_[0-9a-z]{12}$/;
   var PLACEHOLDER_RE = /\{([A-Za-z][A-Za-z0-9_.]*)\}/g;
   var templates = new WeakMap();
+  var pagerTemplates = new WeakMap();
 
-  // The element's own <template> child; remembered, because rendering replaces the element's children.
-  function templateOf(el) {
+  // The element's own <template> children; remembered, because rendering replaces the element's children.
+  function findTemplate(el, cache, pager) {
     for (var c = el.firstElementChild; c; c = c.nextElementSibling) {
-      if (c.tagName === "TEMPLATE" && !c.hasAttribute("data-each")) {
-        templates.set(el, c);
+      if (c.tagName === "TEMPLATE" && !c.hasAttribute("data-each") && c.hasAttribute("data-pager") === pager) {
+        cache.set(el, c);
         break;
       }
     }
-    return templates.get(el) || null;
+    return cache.get(el) || null;
+  }
+
+  function templateOf(el) {
+    return findTemplate(el, templates, false);
+  }
+
+  function pagerTemplateOf(el) {
+    return findTemplate(el, pagerTemplates, true);
   }
 
   function own(o, k) {
@@ -278,9 +288,10 @@
     if (href) node.setAttribute("href", href);
   }
 
-  function fill(root, scope, locale) {
+  // env: { locale, page: function (node, scope) } — page handles data-page inside a pager template.
+  function fill(root, scope, env) {
     // Both lists are taken before data-each inserts its copies, which were already filled with their own scope.
-    var nodes = root.querySelectorAll("[data-field],[data-if],[data-class],[data-href]");
+    var nodes = root.querySelectorAll("[data-field],[data-if],[data-class],[data-href],[data-page]");
     var eaches = root.querySelectorAll("template[data-each]");
     for (var i = 0; i < eaches.length; i++) {
       var tpl = eaches[i];
@@ -288,7 +299,7 @@
       if (Array.isArray(list)) {
         list.forEach(function (item) {
           var copy = tpl.content.cloneNode(true);
-          fill(copy, item, locale);
+          fill(copy, item, env);
           tpl.parentNode.insertBefore(copy, tpl);
         });
       }
@@ -305,9 +316,10 @@
           continue;
         }
       }
-      if (node.hasAttribute("data-field")) bindField(node, scope, locale);
+      if (node.hasAttribute("data-field")) bindField(node, scope, env.locale);
       if (node.hasAttribute("data-class")) bindClass(node, scope);
       if (node.hasAttribute("data-href")) bindHref(node, scope);
+      if (node.hasAttribute("data-page") && env.page) env.page(node, scope);
     }
   }
 
@@ -345,7 +357,7 @@
       var loc = localeOf(el);
       items.forEach(function (item) {
         var copy = tpl.content.cloneNode(true);
-        fill(copy, item, loc);
+        fill(copy, item, { locale: loc });
         ul.appendChild(copy);
       });
       return;
@@ -423,11 +435,67 @@
     el.appendChild(nav);
   }
 
+  // <template data-pager>: filled with the pager's numbers and inserted after the items as div.fcms-pager-custom.
+  function renderCustomPager(el, tpl, scope, page) {
+    var old = customPager(el);
+    if (old) remove(old);
+    var copy = tpl.content.cloneNode(true);
+    fill(copy, scope, { locale: localeOf(el), page: page });
+    var mores = copy.querySelectorAll("[data-more]");
+    for (var i = 0; i < mores.length; i++) {
+      mores[i].addEventListener("click", function (e) {
+        e.preventDefault();
+        more(el);
+      });
+    }
+    var wrap = document.createElement("div");
+    wrap.className = "fcms-pager-custom";
+    wrap.appendChild(copy);
+    el.appendChild(wrap);
+  }
+
+  function customPager(el) {
+    for (var c = el.firstElementChild; c; c = c.nextElementSibling) {
+      if (c.classList.contains("fcms-pager-custom")) return c;
+    }
+    return null;
+  }
+
+  // data-page="prev|next|first|last", or a bare data-page inside data-each="pages" for that page.
+  function renderPagesTemplate(el, tpl, current, pages, total) {
+    var scope = {
+      current: current, totalPages: pages, total: total, hasPrev: current > 1, hasNext: current < pages,
+      pages: pageWindow(current, pages).map(function (p) { return p === 0 ? { gap: true } : { number: p, current: p === current, gap: false }; }),
+    };
+    renderCustomPager(el, tpl, scope, function (node, s) {
+      var which = node.getAttribute("data-page");
+      var target = which === "prev" ? current - 1 : which === "next" ? current + 1 : which === "first" ? 1 : which === "last" ? pages
+        : which === "" && typeof s.number === "number" ? s.number : 0;
+      if (target < 1 || target > pages || (target === current && (which === "prev" || which === "next"))) {
+        node.removeAttribute("href");
+        node.setAttribute("aria-disabled", "true");
+        return;
+      }
+      node.setAttribute("href", pageHref(el, target));
+      if (target === current && which === "") node.setAttribute("aria-current", "page");
+    });
+  }
+
   // State for data-pager="more": how far each element has loaded.
   var moreState = new WeakMap();
 
   function renderMoreButton(el) {
     var state = moreState.get(el);
+    var tpl = pagerTemplateOf(el);
+    if (tpl) {
+      if (!state || state.offset >= state.total) {
+        var stale = customPager(el);
+        if (stale) remove(stale);
+        return;
+      }
+      renderCustomPager(el, tpl, { loaded: state.offset, total: state.total, remaining: state.total - state.offset }, null);
+      return;
+    }
     var old = el.querySelector("button.fcms-more");
     if (!state || state.offset >= state.total) {
       if (old) old.parentNode.removeChild(old);
@@ -446,8 +514,7 @@
     var state = moreState.get(el);
     if (!state || state.loading || state.offset >= state.total) return Promise.resolve();
     state.loading = true;
-    var btn = el.querySelector("button.fcms-more");
-    if (btn) btn.setAttribute("disabled", "");
+    moreButtons(el).forEach(function (b) { b.setAttribute("disabled", ""); });
     return Promise.resolve()
       .then(function () { return fetch(buildUrl(state.collection, state.limit, state.offset, state.filter, state.expand), { credentials: "omit" }); })
       .then(function (res) {
@@ -466,10 +533,15 @@
       .catch(warn)
       .then(function () {
         state.loading = false;
-        var b = el.querySelector("button.fcms-more");
-        if (b) b.removeAttribute("disabled");
+        moreButtons(el).forEach(function (b) { b.removeAttribute("disabled"); });
         renderMoreButton(el);
       });
+  }
+
+  function moreButtons(el) {
+    var wrap = customPager(el);
+    var found = wrap ? wrap.querySelectorAll("[data-more]") : el.querySelectorAll("button.fcms-more");
+    return Array.prototype.slice.call(found);
   }
 
   function renderEmpty(el) {
@@ -494,7 +566,7 @@
     var tpl = templateOf(el);
     if (tpl) {
       var copy = tpl.content.cloneNode(true);
-      fill(copy, item, locale);
+      fill(copy, item, { locale: locale });
       el.textContent = "";
       el.appendChild(copy);
       setDocumentTitle(el, item);
@@ -591,6 +663,7 @@
     var page = pager === "pages" ? pageNumber(el) : 1;
     var offset = pager === "pages" || pager === "more" ? (page - 1) * limit : null;
     var expand = expandsOf(templateOf(el));
+    var pagerTpl = pagerTemplateOf(el); // read before rendering replaces the children
     return Promise.resolve()
       .then(function () { return fetch(buildUrl(collection, limit, offset, filter, expand), { credentials: "omit" }); })
       .then(function (res) {
@@ -606,7 +679,8 @@
         var total = typeof body.total === "number" ? body.total : body.items.length;
         if (pager === "pages") {
           var pages = Math.ceil(total / limit);
-          if (pages > 1) renderPager(el, page, pages);
+          if (pages > 1 && pagerTpl) renderPagesTemplate(el, pagerTpl, page, pages, total);
+          else if (pages > 1) renderPager(el, page, pages);
         } else if (pager === "more" && body.items.length) {
           moreState.set(el, { collection: collection, limit: limit, filter: filter, expand: expand, offset: body.items.length, total: total, loading: false });
           renderMoreButton(el);

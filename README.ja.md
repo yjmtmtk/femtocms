@@ -251,6 +251,41 @@ MCP のエンドポイントは `https://<サイト>/mcp`（Streamable HTTP、�
 
 テンプレートの中身が `<li>` なら `<ul class="fcms-items">`、それ以外は `<div class="fcms-items">` で包みます。グリッドなどのレイアウトはこの `.fcms-items` に指定します。テンプレートを使うときは、一覧の要素に付けた `data-fields`・`data-href`・`data-heading` は使いません。ページ送り・「もっと見る」・`data-filter`・`data-empty`・`data-document-title` はそのまま使えます。値は常にテキストとして入るので、データに HTML が含まれていてもそのまま表示され、HTML としては解釈されません。
 
+#### ページ送りのテンプレート
+
+`data-pager` を付けた一覧には、`<template data-pager>` をもう1つ置けます。置くと標準のページ送りのかわりに、それを `<div class="fcms-pager-custom">` に入れて一覧の下に出します。中では記事のテンプレートと同じ `data-field`・`data-if`・`data-class`・`<template data-each>` が使え、リンクには `data-page`、ボタンには `data-more` を付けます。
+
+```html
+<div data-femtocms="news" data-limit="10" data-pager="pages">
+  <template> …記事1件ぶん… </template>
+  <template data-pager>
+    <nav class="pager">
+      <a data-page="prev">←</a>
+      <template data-each="pages">
+        <span data-if="gap">…</span>
+        <a data-if="!gap" data-page data-field="number" data-class="current"></a>
+      </template>
+      <a data-page="next">→</a>
+      <p>全 <span data-field="total"></span> 件</p>
+    </nav>
+  </template>
+</div>
+
+<div data-femtocms="news" data-limit="6" data-pager="more">
+  <template> …記事1件ぶん… </template>
+  <template data-pager>
+    <button data-more>もっと見る（あと <span data-field="remaining"></span> 件）</button>
+  </template>
+</div>
+```
+
+| 使える値 | 内容 |
+|---|---|
+| `pages` のとき | `current`（今のページ）・`totalPages`・`total`（全件数）・`hasPrev`・`hasNext`・`pages`（ページ番号の並び。各要素は `number`・`current`・`gap`） |
+| `more` のとき | `loaded`（表示済みの件数）・`total`・`remaining`（残りの件数） |
+
+`data-page="prev"`・`"next"`・`"first"`・`"last"`、`data-each="pages"` の中の値なしの `data-page` には、リンク先（今の URL のほかのパラメータを残したもの）が入ります。前後のページがないときは `href` を外して `aria-disabled="true"` を付けるので、CSS で薄くしたり隠したりできます。今のページへのリンクには `aria-current="page"` が付きます。`data-more` を付けた要素を押すと次の分を読み込み（リンクでもページは移動しません）、読み込み中は `disabled` が付き、全部読み込むとページ送りの部分ごと消えます。1ページに収まるときは何も出しません。
+
 ## キャッシュ
 
 - **workers.dev（既定）:** 公開の読み出しに `Cache-Control: public, max-age=60` と `ETag` を付けます（条件付きリクエストには 304 を返します）。数件程度なら、毎回 D1 を読んでも十分速いからです。

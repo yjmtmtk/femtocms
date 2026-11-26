@@ -134,7 +134,7 @@ Every delete (entries, media, collections) **moves the item to the trash**. Dele
 | `logout [--name <profile>]` | Removes a saved profile. |
 | `keys create --name <name> [--role admin\|read]` / `keys list` / `keys revoke <id>` | Manage API keys. |
 | `collections list \| get <name> \| create \| update <name> \| delete <name>` | Manage schemas. `create` takes `--file` (JSON or YAML), or `--name`, `--label`, `--kind` and repeated `--field name:type[:required]`. |
-| `entries list <collection>` | Options `--limit`, `--offset`, `--sort`, `--filter k=v`, `--fields`, `--expand`, `--status draft\|published\|all`. Lists published entries by default. |
+| `entries list <collection>` | Options `--limit`, `--offset`, `--sort`, `--filter k=v`, `--fields`, `--expand`, `--status draft\|published\|all`, `--after <id\|slug>`, `--before <id\|slug>`. Lists published entries by default. |
 | `entries get <collection> [id]` | One entry by id or slug (omit the id for a `single` collection). |
 | `entries create <collection>` / `entries update <collection> <id>` | Body from `--data <json>`, `--file post.md` (YAML front matter becomes fields, the body goes to `--body-field`) or `--set k=v`. Also `--slug`, `--published-at <iso>`, `--publish`. |
 | `entries delete \| publish \| unpublish <collection> <id>` | Trash, publish, or turn back into a draft. |
@@ -154,7 +154,7 @@ Base: `https://<your-site>/api`, JSON in and out. The machine-readable spec, gen
 - Published entries of public collections need no key.
 - Collections: `GET/POST /api/collections`, `GET/PATCH/DELETE /api/collections/:name`.
 - Entries: `GET/POST /api/:collection`, `GET/PATCH/DELETE /api/:collection/:idOrSlug`, `POST /api/:collection/:id/publish`, `POST /api/:collection/:id/unpublish`, `POST /api/:collection/:id/preview`. A `single` collection uses `GET/PUT /api/:collection`.
-- List parameters: `limit` (default 10, max 100), `offset`, `sort` (`-publishedAt`; the default is newest published first), `filter[field]=value` or `filter[field][gte]=1000` (operators `eq ne lt lte gt gte contains in`), `fields`, `expand` (one level; the entry then lists the replaced fields in `expanded`), `status` (`draft`, `published`, `all`; admin only, default `published`). The response is `{ items, total, limit, offset }`.
+- List parameters: `limit` (default 10, max 100), `offset`, `sort` (`-publishedAt`; the default is newest published first), `filter[field]=value` or `filter[field][gte]=1000` (operators `eq ne lt lte gt gte contains in`), `fields`, `expand` (one level; the entry then lists the replaced fields in `expanded`), `status` (`draft`, `published`, `all`; admin only, default `published`), `after` / `before` (an entry id or slug: only the entries after / before it in this sort order, so `limit=1` gives the next / previous one; ties are broken the same way as the list, and `total` counts what is past the cursor). The response is `{ items, total, limit, offset }`.
 - Media: `POST /api/media` (multipart `file`, or JSON `{ url }` / `{ base64, filename }`), `GET /api/media`, `PATCH /api/media/:id` (`{ alt }`), `DELETE /api/media/:id`; files are served from `/media/:id/:filename`.
 - Trash: `GET /api/trash`, `POST /api/trash/:id/restore`, `DELETE /api/trash/:id?confirm=<site>`, `DELETE /api/trash?confirm=<site>`.
 - Admin: `GET/POST/DELETE /api/keys`, `GET /api/export`, `POST /api/import`, `POST /api/reset`.

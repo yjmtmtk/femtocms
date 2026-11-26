@@ -118,7 +118,7 @@ describe("buildOpenApi", () => {
 
   it("一覧のクエリパラメータ", () => {
     const names = build().paths["/api/news"].get.parameters.map((p: Doc) => p.name);
-    expect(names).toEqual(["limit", "offset", "sort", "filter[field]", "filter[field][op]", "fields", "expand", "status"]);
+    expect(names).toEqual(["limit", "offset", "sort", "filter[field]", "filter[field][op]", "fields", "expand", "status", "after", "before"]);
     const status = build().paths["/api/news"].get.parameters.find((p: Doc) => p.name === "status");
     expect(status.schema.default).toBe("published");
     expect(status.description).toMatch(/Admin only/);

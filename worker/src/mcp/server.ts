@@ -150,6 +150,11 @@ export function buildMcpServer(ctx: Ctx): McpServer {
       status: z.enum(["draft", "published", "all"]).optional().describe(
         "Which entries to list. Default \"published\" (drafts are hidden). Use \"all\" or \"draft\" to see drafts.",
       ),
+      after: z.string().optional().describe(
+        "Entry id or slug: list only the entries that come after it in this sort order (with limit 1: the next one). " +
+        "Use instead of offset to walk a long list without skipping or repeating entries.",
+      ),
+      before: z.string().optional().describe("Entry id or slug: list only the entries that come before it in this sort order (still returned in list order)."),
     },
     annotations: READ,
   }, (args) => run(async () => {
@@ -160,6 +165,8 @@ export function buildMcpServer(ctx: Ctx): McpServer {
     if (args.fields) qs.set("fields", args.fields.join(","));
     if (args.expand) qs.set("expand", args.expand.join(","));
     if (args.status !== undefined) qs.set("status", args.status);
+    if (args.after !== undefined) qs.set("after", args.after);
+    if (args.before !== undefined) qs.set("before", args.before);
     for (const [field, cond] of Object.entries(args.filter ?? {})) {
       if (typeof cond === "string") qs.set(`filter[${field}]`, cond);
       else for (const [op, v] of Object.entries(cond)) qs.set(`filter[${field}][${op}]`, v);

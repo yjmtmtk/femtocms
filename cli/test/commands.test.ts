@@ -114,13 +114,15 @@ describe("entries list", () => {
     const r = recorder({ "GET /api/news": { items: [], total: 0, limit: 10, offset: 0 } });
     await entriesList(r.client, "news", {
       limit: "5", offset: "10", sort: "-publishedAt", filter: ["kind=x", "price[gte]=100", "price[lte]=500"],
-      fields: "title,price", expand: "related", status: "all",
+      fields: "title,price", expand: "related", status: "all", after: "winter-latte",
     });
     const q = new URLSearchParams(r.calls[0]!.search);
     expect(Object.fromEntries(q)).toEqual({
       limit: "5", offset: "10", sort: "-publishedAt", "filter[kind]": "x", "filter[price][gte]": "100",
-      "filter[price][lte]": "500", fields: "title,price", expand: "related", status: "all",
+      "filter[price][lte]": "500", fields: "title,price", expand: "related", status: "all", after: "winter-latte",
     });
+    await entriesList(r.client, "news", { before: "e_abc" });
+    expect(new URLSearchParams(r.calls[1]!.search).get("before")).toBe("e_abc");
   });
 
   it("status を指定しなければ送らない（サーバ既定は published）。不正な --filter はエラー", async () => {

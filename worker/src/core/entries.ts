@@ -2,7 +2,7 @@ import { getCollectionRow } from "./collections";
 import { bumpVersion, requireRole, type Ctx } from "./context";
 import { FemtoError, type Issue } from "./errors";
 import { newId, SLUG_RE } from "./ids";
-import { buildListQuery, type ListParams } from "./query";
+import { buildListQuery, cursorLookup, type ListParams } from "./query";
 import type { Collection, EntryRecord, FieldDef, Status } from "./types";
 import { validateData, type ValidateResult } from "./validate";
 
@@ -104,13 +104,29 @@ export async function listEntryRecords(ctx: Ctx, collection: string, params: Lis
   if (ctx.role === "public" && !c.public) {
     throw new FemtoError("not_found", `コレクション "${collection}" が見つかりません`, { hint: "list_collections で一覧を確認してください" });
   }
-  const q = buildListQuery(c, params, ctx.role);
+  if (params.after !== undefined && params.before !== undefined) {
+    throw new FemtoError("bad_request", "after と before は同時に指定できません", { hint: "どちらか一方だけを指定してください" });
+  }
+  let cursorValues: unknown[] | undefined;
+  const lookup = cursorLookup(c, params, ctx.role);
+  if (lookup) {
+    const key = (params.after ?? params.before)!;
+    const row = await ctx.db.prepare(lookup.sql).bind(c.id, key, key).first<Record<string, unknown>>();
+    if (!row) {
+      throw new FemtoError("bad_request", `${params.after !== undefined ? "after" : "before"} に指定したエントリ "${key}" が見つかりません`, {
+        hint: `"${collection}" にある${ctx.role === "admin" ? "" : "公開済みの"}エントリの id か slug を指定してください`,
+      });
+    }
+    cursorValues = Array.from({ length: lookup.keys }, (_, i) => row[`k${i}`] ?? null);
+  }
+  const q = buildListQuery(c, params, ctx.role, cursorValues);
   const [page, count] = await ctx.db.batch([
     ctx.db.prepare(q.sql).bind(...q.binds),
     ctx.db.prepare(q.countSql).bind(...q.binds),
   ]);
+  const rows = page.results as EntryRow[];
   return {
-    items: (page.results as EntryRow[]).map(toRecord),
+    items: (q.reversed ? rows.reverse() : rows).map(toRecord),
     total: (count.results[0] as { n: number }).n,
     limit: q.limit,
     offset: q.offset,

@@ -134,7 +134,7 @@ femtocms は、管理画面のない CMS です。**自分の Cloudflare アカ�
 | `logout [--name <profile>]` | 保存済みのプロファイルを削除します。 |
 | `keys create --name <name> [--role admin\|read]` / `keys list` / `keys revoke <id>` | API キーの管理。 |
 | `collections list \| get <name> \| create \| update <name> \| delete <name>` | スキーマの管理。`create` は `--file`（JSON か YAML）、または `--name`・`--label`・`--kind` と、繰り返し指定できる `--field name:type[:required]` で指定します。 |
-| `entries list <collection>` | オプション: `--limit`、`--offset`、`--sort`、`--filter k=v`、`--fields`、`--expand`、`--status draft\|published\|all`。既定は公開済みのみです。 |
+| `entries list <collection>` | オプション: `--limit`、`--offset`、`--sort`、`--filter k=v`、`--fields`、`--expand`、`--status draft\|published\|all`、`--after <id\|slug>`、`--before <id\|slug>`。既定は公開済みのみです。 |
 | `entries get <collection> [id]` | 1件を id か slug で取得（`single` のコレクションは id 省略可）。 |
 | `entries create <collection>` / `entries update <collection> <id>` | 本文は `--data <json>`、`--file post.md`（先頭の YAML front matter がフィールドに、本文が `--body-field` に入る）、`--set k=v` のいずれかで渡します。`--slug`、`--published-at <iso>`、`--publish` も使えます。 |
 | `entries delete \| publish \| unpublish <collection> <id>` | ゴミ箱へ移す／公開する／下書きに戻す。 |
@@ -154,7 +154,7 @@ femtocms は、管理画面のない CMS です。**自分の Cloudflare アカ�
 - 公開コレクションの公開済みエントリは、キーなしで読めます。
 - コレクション: `GET/POST /api/collections`、`GET/PATCH/DELETE /api/collections/:name`
 - エントリ: `GET/POST /api/:collection`、`GET/PATCH/DELETE /api/:collection/:idOrSlug`、`POST /api/:collection/:id/publish`、`POST /api/:collection/:id/unpublish`、`POST /api/:collection/:id/preview`。`single` のコレクションは `GET/PUT /api/:collection` です。
-- 一覧のパラメータ: `limit`（既定 10、最大 100）、`offset`、`sort`（`-publishedAt` など。既定は公開日の新しい順）、`filter[フィールド]=値` または `filter[フィールド][gte]=1000`（演算子は `eq ne lt lte gt gte contains in`）、`fields`、`expand`（1段まで。置き換えたフィールド名は記事の `expanded` に入ります）、`status`（`draft`・`published`・`all`。管理キーのみ、既定は `published`）。応答は `{ items, total, limit, offset }` です。
+- 一覧のパラメータ: `limit`（既定 10、最大 100）、`offset`、`sort`（`-publishedAt` など。既定は公開日の新しい順）、`filter[フィールド]=値` または `filter[フィールド][gte]=1000`（演算子は `eq ne lt lte gt gte contains in`）、`fields`、`expand`（1段まで。置き換えたフィールド名は記事の `expanded` に入ります）、`status`（`draft`・`published`・`all`。管理キーのみ、既定は `published`）、`after` / `before`（エントリの id か slug。その並び順でそれより後ろ・前のものだけを返すので、`limit=1` なら次・前の1件。同じ値どうしの順番も一覧と同じで、`total` はその先の件数）。応答は `{ items, total, limit, offset }` です。
 - メディア: `POST /api/media`（multipart の `file`、または JSON の `{ url }` / `{ base64, filename }`）、`GET /api/media`、`PATCH /api/media/:id`（`{ alt }`）、`DELETE /api/media/:id`。ファイルは `/media/:id/:filename` で配信されます。
 - ゴミ箱: `GET /api/trash`、`POST /api/trash/:id/restore`、`DELETE /api/trash/:id?confirm=<サイト名>`、`DELETE /api/trash?confirm=<サイト名>`
 - 管理: `GET/POST/DELETE /api/keys`、`GET /api/export`、`POST /api/import`、`POST /api/reset`

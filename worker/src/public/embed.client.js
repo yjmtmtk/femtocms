@@ -179,22 +179,14 @@
     return url.toString();
   }
 
-  // The entry published just before ("lt") or just after ("gt") the given time, nearest first in list order.
-  function neighborUrl(collection, op, publishedAt, filter) {
+  // The entry right after ("after") or right before ("before") the given one in the list's order (newest first).
+  // The server's cursor breaks ties on the publish time exactly like the list does.
+  function neighborUrl(collection, dir, id, filter) {
     var url = collectionUrl(collection);
     url.searchParams.set("limit", "1");
-    url.searchParams.set("sort", op === "lt" ? "-publishedAt,-createdAt" : "publishedAt,createdAt");
+    url.searchParams.set("sort", DEFAULT_SORT);
     applyFilter(url, filter);
-    url.searchParams.set("filter[publishedAt][" + op + "]", publishedAt);
-    return url.toString();
-  }
-
-  // Entries published at exactly the same time, in the list's default order (newest created first, then id).
-  function sameTimeUrl(collection, publishedAt, filter) {
-    var url = collectionUrl(collection);
-    url.searchParams.set("limit", "100");
-    applyFilter(url, filter);
-    url.searchParams.set("filter[publishedAt]", publishedAt);
+    url.searchParams.set(dir, id);
     return url.toString();
   }
 
@@ -713,31 +705,19 @@
       });
   }
 
-  // prev = the entry published just before this one (older), next = just after (newer). Published entries only.
+  // prev = the entry listed right after this one (older), next = right before it (newer). Published entries only.
   function renderPrevNext(el, collection, item, token) {
     var tpl = templatesOf(el).prevnext;
     if (!tpl && !el.hasAttribute("data-prevnext")) return null;
     if (item.status !== "published" || typeof item.publishedAt !== "string") return null;
     var filter = el.getAttribute("data-filter") || "";
     return Promise.all([
-      firstItem(neighborUrl(collection, "lt", item.publishedAt, filter), collection),
-      firstItem(neighborUrl(collection, "gt", item.publishedAt, filter), collection),
-      getJson(sameTimeUrl(collection, item.publishedAt, filter), collection).catch(function (err) {
-        warn(err);
-        return null;
-      }),
+      firstItem(neighborUrl(collection, "after", item.id, filter), collection),
+      firstItem(neighborUrl(collection, "before", item.id, filter), collection),
     ]).then(function (found) {
       if (latest.get(el) !== token) return;
       var prev = found[0];
       var next = found[1];
-      // Entries sharing this publish time sit between the two in list order: step through them first.
-      var group = found[2] && Array.isArray(found[2].items) ? found[2].items : [];
-      var at = -1;
-      for (var i = 0; i < group.length; i++) if (group[i] && group[i].id === item.id) at = i;
-      if (at >= 0) {
-        if (at + 1 < group.length) prev = trust(group[at + 1]);
-        if (at > 0) next = trust(group[at - 1]);
-      }
       if (!prev && !next) return;
       if (tpl) {
         renderBlock(el, tpl, "fcms-prevnext-custom", { prev: prev, next: next }, {

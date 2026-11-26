@@ -11,6 +11,9 @@ export interface ListParams {
   fields?: string[];
   expand?: string[];
   status?: ListStatus;
+  /** Id or slug of an entry: list what comes after it (or before it) in this sort order. */
+  after?: string;
+  before?: string;
 }
 
 export const DEFAULT_LIMIT = 10;
@@ -30,7 +33,7 @@ function badInt(name: string, v: string): FemtoError {
   });
 }
 
-/** Parses `limit/offset/sort/filter[...]/fields/expand/status` from a query string. Values are not validated against a schema here. */
+/** Parses `limit/offset/sort/filter[...]/fields/expand/status/after/before` from a query string. Values are not validated against a schema here. */
 export function parseListParams(query: URLSearchParams): ListParams {
   const params: ListParams = {};
   const filter = new Map<string, string | Record<string, string>>();
@@ -46,6 +49,8 @@ export function parseListParams(query: URLSearchParams): ListParams {
       case "sort": params.sort = value; break;
       case "fields": params.fields = csv(value); break;
       case "expand": params.expand = csv(value); break;
+      case "after":
+      case "before": params[key] = value; break;
       case "status":
         if (value !== "draft" && value !== "published" && value !== "all") {
           throw new FemtoError("bad_request", `status が不正です (受け取った値: "${value}")`, {
@@ -224,23 +229,69 @@ function filterClauses(cols: Map<string, Column>, filter: NonNullable<ListParams
 
 // --- sorting -----------------------------------------------------------------------------------
 
-// Nulls always sort last, whatever the direction. `id` keeps pagination stable.
-const nullsLast = (expr: string, dir: "ASC" | "DESC") => `${expr} IS NULL, ${expr} ${dir}`;
-const DEFAULT_ORDER = [nullsLast("published_at", "DESC"), "created_at DESC", "id ASC"].join(", ");
+// Nulls always sort last, whatever the direction. The trailing `id` makes the order total, so pages and
+// after / before cursors are stable even when every other key ties.
+interface OrderKey { expr: string; desc: boolean }
+const DEFAULT_KEYS: OrderKey[] = [{ expr: "published_at", desc: true }, { expr: "created_at", desc: true }];
 
-function orderBy(cols: Map<string, Column>, sort: string | undefined): string {
+function orderKeys(cols: Map<string, Column>, sort: string | undefined): OrderKey[] {
   const keys = sort ? csv(sort) : [];
-  if (keys.length === 0) return DEFAULT_ORDER;
-  const parts = keys.map(key => {
+  const parts = keys.length === 0 ? DEFAULT_KEYS : keys.map(key => {
     const desc = key.startsWith("-");
     const name = desc ? key.slice(1) : key;
     const col = column(cols, name, "sort");
     if (col.kind === "multi") {
       throw new FemtoError("bad_request", `"${name}" は複数選択のため sort に使えません`, { hint: usable(cols) });
     }
-    return nullsLast(col.expr, desc ? "DESC" : "ASC");
+    return { expr: col.expr, desc };
   });
-  return [...parts, "id ASC"].join(", ");
+  return [...parts, { expr: "id", desc: false }];
+}
+
+// `reverse` walks the same order backwards (nulls first), for `before`.
+function orderSql(keys: OrderKey[], reverse: boolean): string {
+  return keys.map(k => `${k.expr} IS NULL${reverse ? " DESC" : ""}, ${k.expr} ${k.desc !== reverse ? "DESC" : "ASC"}`).join(", ");
+}
+
+/**
+ * Rows strictly after (or before) the cursor row in the order of `keys`, given the cursor's value for each key:
+ * k0 beyond v0, or k0 = v0 and (k1 beyond v1, or k1 = v1 and (...)). The last key (id) is unique, so the chain ends there.
+ */
+function cursorClause(keys: OrderKey[], values: unknown[], dir: "after" | "before", binds: unknown[]): string {
+  const forward = dir === "after";
+  const step = (i: number): string => {
+    const { expr, desc } = keys[i];
+    const v = values[i];
+    let beyond: string;
+    let same: string;
+    if (v === null || v === undefined) {
+      // Nulls are last: nothing non-null comes after a null, everything non-null comes before it.
+      beyond = forward ? "0" : `${expr} IS NOT NULL`;
+      same = `${expr} IS NULL`;
+    } else {
+      const op = desc === forward ? "<" : ">";
+      beyond = forward ? `(${expr} IS NULL OR ${expr} ${op} ?)` : `(${expr} IS NOT NULL AND ${expr} ${op} ?)`;
+      same = `${expr} = ?`;
+      binds.push(v);
+    }
+    if (i === keys.length - 1) return beyond;
+    if (v !== null && v !== undefined) binds.push(v); // for `same`, which follows `beyond` in the SQL
+    return `(${beyond} OR (${same} AND ${step(i + 1)}))`;
+  };
+  return step(0);
+}
+
+/** The cursor row's values for each order key, read with this query (binds: collection id, id or slug, id or slug). */
+export function cursorLookup(collection: Collection, params: ListParams, role: Role): { sql: string; keys: number } | null {
+  if (params.after === undefined && params.before === undefined) return null;
+  const keys = orderKeys(resolveColumns(collection), params.sort);
+  // Readers who only see published entries cannot use a draft as a cursor (its position would leak).
+  const visible = role === "admin" ? "" : " AND status = 'published'";
+  return {
+    sql: `SELECT ${keys.map((k, i) => `${k.expr} AS k${i}`).join(", ")} FROM entries ` +
+      `WHERE collection_id = ? AND deleted_at IS NULL AND (id = ? OR slug = ?)${visible} LIMIT 1`,
+    keys: keys.length,
+  };
 }
 
 // --- builder -----------------------------------------------------------------------------------
@@ -252,6 +303,8 @@ export interface ListQuery {
   binds: unknown[];
   limit: number;
   offset: number;
+  /** `before`: the rows come nearest-first and must be reversed into list order. */
+  reversed: boolean;
 }
 
 function clampInt(v: number | undefined, fallback: number, min: number, max: number): number {
@@ -259,7 +312,8 @@ function clampInt(v: number | undefined, fallback: number, min: number, max: num
   return Math.min(max, Math.max(min, Math.floor(v)));
 }
 
-export function buildListQuery(collection: Collection, params: ListParams, role: Role): ListQuery {
+/** `cursorValues`: the after / before entry's value for each order key (from cursorLookup); required when either is set. */
+export function buildListQuery(collection: Collection, params: ListParams, role: Role, cursorValues?: unknown[]): ListQuery {
   const limit = clampInt(params.limit, DEFAULT_LIMIT, 1, MAX_LIMIT);
   const offset = clampInt(params.offset, 0, 0, Number.MAX_SAFE_INTEGER);
   const requested = params.status ?? "published";
@@ -277,15 +331,21 @@ export function buildListQuery(collection: Collection, params: ListParams, role:
     binds.push(status);
   }
   where.push(...filterClauses(cols, params.filter ?? {}, binds));
+  const keys = orderKeys(cols, params.sort);
+  const dir = params.after !== undefined ? "after" : params.before !== undefined ? "before" : null;
+  if (dir) {
+    if (!cursorValues || cursorValues.length !== keys.length) throw new Error("buildListQuery: cursor values missing");
+    where.push(cursorClause(keys, cursorValues, dir, binds));
+  }
   if (binds.length > MAX_BINDS) {
     throw new FemtoError("bad_request", "filter の条件が多すぎます", { hint: `値の合計は ${MAX_BINDS - 2} 個までです` });
   }
 
-  const order = orderBy(cols, params.sort);
   const whereSql = where.join(" AND ");
+  const reversed = dir === "before";
   return {
-    sql: `SELECT * FROM entries WHERE ${whereSql} ORDER BY ${order} LIMIT ${limit} OFFSET ${offset}`,
+    sql: `SELECT * FROM entries WHERE ${whereSql} ORDER BY ${orderSql(keys, reversed)} LIMIT ${limit} OFFSET ${offset}`,
     countSql: `SELECT COUNT(*) AS n FROM entries WHERE ${whereSql}`,
-    binds, limit, offset,
+    binds, limit, offset, reversed,
   };
 }

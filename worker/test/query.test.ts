@@ -34,6 +34,9 @@ beforeEach(async () => {
 });
 
 describe("parseListParams", () => {
+  it("after / before を文字列で受け取る", () => {
+    expect(q("after=e_abc&before=x")).toMatchObject({ after: "e_abc", before: "x" });
+  });
   it("filter / fields / expand / limit を解釈する", () => {
     expect(q("filter[category]=info&filter[price][gte]=1000&fields=title,body&expand=author&limit=5&offset=2&sort=-price&status=all"))
       .toEqual({
@@ -160,5 +163,65 @@ describe("listEntryRecords", () => {
   it("unpublish した下書きは public 一覧から消える", async () => {
     await unpublishEntry(admin(), "news", ids[0]);
     expect((await listEntryRecords(pub(), "news", {})).total).toBe(1);
+  });
+});
+
+describe("after / before（この記事の次・前から）", () => {
+  // Ties on purpose: four entries share one publish time, and two of those also share a created time.
+  const T = "2026-05-01T00:00:00.000Z";
+  async function seed(): Promise<string[]> {
+    await createCollection(admin(), { name: "posts", kind: "list", fields: [{ name: "title", type: "text" }, { name: "rank", type: "number" }] });
+    const spec: [string, string | null, string, number | null][] = [
+      ["p1", "2026-06-01T00:00:00.000Z", "2026-01-01T00:00:00.000Z", 3],
+      ["p2", T, "2026-01-02T00:00:00.000Z", 1],
+      ["p3", T, "2026-01-03T00:00:00.000Z", null],
+      ["p4", T, "2026-01-03T00:00:00.000Z", 2],
+      ["p5", T, "2026-01-04T00:00:00.000Z", 1],
+      ["p6", "2026-04-01T00:00:00.000Z", "2026-01-05T00:00:00.000Z", null],
+      ["p7", null, "2026-01-06T00:00:00.000Z", 5],
+    ];
+    const out: string[] = [];
+    for (const [slug, pub, created, rank] of spec) {
+      const e = await createEntry(admin(), "posts", { slug, data: rank === null ? { title: slug } : { title: slug, rank } });
+      if (pub) await publishEntry(admin(), "posts", e.id);
+      await env.DB.prepare("UPDATE entries SET published_at = ?, created_at = ? WHERE id = ?").bind(pub, created, e.id).run();
+      out.push(e.id);
+    }
+    return out;
+  }
+  const order = async (s: string) => (await listEntryRecords(admin(), "posts", q(`limit=100&status=all${s}`))).items.map(e => e.id);
+
+  for (const sort of ["", "&sort=-publishedAt", "&sort=rank", "&sort=-rank,title", "&sort=publishedAt"]) {
+    it(`どの並び順でも、after は1つ後ろ、before は1つ前を返す（${sort || "既定"}）`, async () => {
+      await seed();
+      const all = await order(sort);
+      expect(all.length).toBe(7);
+      for (let i = 0; i < all.length; i++) {
+        expect(await order(`${sort}&after=${all[i]}&limit=1`)).toEqual(all.slice(i + 1, i + 2));
+        expect(await order(`${sort}&before=${all[i]}&limit=1`)).toEqual(all.slice(Math.max(0, i - 1), i));
+      }
+    });
+  }
+
+  it("limit・offset・total は、カーソルの先の範囲で数える。before も一覧と同じ向きで返す", async () => {
+    await seed();
+    const all = await order("");
+    const after = await listEntryRecords(admin(), "posts", q(`status=all&after=${all[1]}&limit=2&offset=1`));
+    expect(after.items.map(e => e.id)).toEqual(all.slice(3, 5));
+    expect(after.total).toBe(5);
+    const before = await listEntryRecords(admin(), "posts", q(`status=all&before=${all[5]}&limit=3`));
+    expect(before.items.map(e => e.id)).toEqual(all.slice(2, 5));
+    expect(before.total).toBe(5);
+  });
+
+  it("slug でも指定でき、公開済みだけを見る人には下書きをカーソルに使わせない", async () => {
+    const ids = await seed();
+    const pubAll = (await listEntryRecords(pub(), "posts", q("limit=100"))).items.map(e => e.id);
+    expect(pubAll).not.toContain(ids[6]);
+    expect((await listEntryRecords(pub(), "posts", q("after=p2&limit=1"))).items.map(e => e.id))
+      .toEqual(pubAll.slice(pubAll.indexOf(ids[1]) + 1, pubAll.indexOf(ids[1]) + 2));
+    await expect(listEntryRecords(pub(), "posts", q("after=p7"))).rejects.toMatchObject({ code: "bad_request" });
+    await expect(listEntryRecords(admin(), "posts", q("after=nope"))).rejects.toMatchObject({ code: "bad_request" });
+    await expect(listEntryRecords(admin(), "posts", q("after=p1&before=p2"))).rejects.toMatchObject({ code: "bad_request" });
   });
 });

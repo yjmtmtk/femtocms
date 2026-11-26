@@ -79,6 +79,8 @@ function listParameters(c: Collection): Obj[] {
       ? `Comma-separated reference fields to return as entry objects instead of ids (null when missing, trashed or not readable). Reference fields: ${references.join(", ")}.`
       : "Comma-separated reference fields to expand (this collection has none)."),
     queryParam("status", "Admin only (other roles always get published): published (default), draft, or all.", { type: "string", enum: ["published", "draft", "all"], default: "published" }),
+    queryParam("after", "Entry id or slug: only entries after it in this sort order (limit=1 gives the next one). total counts what is after it. Not with before."),
+    queryParam("before", "Entry id or slug: only entries before it in this sort order, still returned in list order (limit=1 gives the previous one). Not with after."),
   ];
 }
 

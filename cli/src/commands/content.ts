@@ -92,6 +92,8 @@ export interface EntriesListOpts {
   fields?: string;
   expand?: string;
   status?: string;
+  after?: string;
+  before?: string;
 }
 
 export interface EntryWriteOpts {
@@ -120,6 +122,8 @@ export async function entriesList(client: FemtoClient, collection: string, opts:
     fields: opts.fields,
     expand: opts.expand,
     status: opts.status,
+    after: opts.after,
+    before: opts.before,
   };
   for (const spec of opts.filter ?? []) {
     const [k, v] = filterQuery(spec);
@@ -450,6 +454,8 @@ export function registerContent(program: Command): void {
     .option("--fields <a,b>", "返すフィールド")
     .option("--expand <a,b>", "展開する参照フィールド")
     .option("--status <status>", "draft | published | all（既定は published。下書きを見るには draft か all）")
+    .option("--after <idOrSlug>", "このエントリより後ろ（この並び順で）だけを返す。--limit 1 なら次の1件")
+    .option("--before <idOrSlug>", "このエントリより前（この並び順で）だけを返す。並びは一覧と同じ向き")
     .action(guarded(async (c: string, o: EntriesListOpts, cmd: Command) => {
       out(cmd, await entriesList(clientFor(cmd), c, o), humanEntries);
     }));

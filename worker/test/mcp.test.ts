@@ -159,6 +159,11 @@ describe("流れ", () => {
     const hidden = await call(client, "list_entries", { collection: "news" });
     expect(hidden.structuredContent.total).toBe(0);
     expect((await call(client, "list_entries", { collection: "news", status: "draft" })).structuredContent.total).toBe(1);
+    await call(client, "create_entry", { collection: "news", data: { title: "春" } });
+    const ids = (r: { structuredContent: { items: { id: string }[] } }) => r.structuredContent.items.map((e) => e.id);
+    const all = ids(await call(client, "list_entries", { collection: "news", status: "draft" }));
+    expect(ids(await call(client, "list_entries", { collection: "news", status: "draft", after: all[0] }))).toEqual([all[1]]);
+    expect(ids(await call(client, "list_entries", { collection: "news", status: "draft", before: all[1] }))).toEqual([all[0]]);
 
     const preview = await call(client, "get_preview_url", { collection: "news", id });
     expect(preview.structuredContent.url).toMatch(/^https:\/\/cms\.test\/preview\//);

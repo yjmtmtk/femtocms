@@ -3,3 +3,6 @@ dist
 .wrangler
 coverage
 *.tgz
+
+# Playwright MCP の作業ファイル（スクリーンショットなど）
+.playwright-mcp/

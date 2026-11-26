@@ -110,3 +110,41 @@ describe("基礎", () => {
     expect(() => requireConfirm(admin(), env.SITE_NAME)).not.toThrow();
   });
 });
+
+describe("default はフィールド自身の検証を通る値だけ (path は fields[i].default)", () => {
+  const issuesOf = async (fields: unknown[]) => {
+    const e = await createCollection(admin(), { name: "d", fields }).then(() => null, (x) => x);
+    expect(e).toMatchObject({ code: "validation_failed" });
+    return (e as { issues: { path: string }[] }).issues.map((i) => i.path);
+  };
+
+  it("型・選択肢・長さ・範囲に合わない default は作成時に断る", async () => {
+    expect(await issuesOf([
+      { name: "title", type: "text", maxLength: 3, default: "toolong" },
+      { name: "n", type: "number", min: 0, default: -1 },
+      { name: "kind", type: "select", options: ["a", "b"], default: "c" },
+      { name: "tags", type: "select", options: ["a"], multiple: true, default: ["a", "z"] },
+      { name: "on", type: "boolean", default: "yes" },
+      { name: "at", type: "datetime", default: "someday" },
+      { name: "pic", type: "image", default: "not-an-id" },
+    ])).toEqual([
+      "fields[0].default", "fields[1].default", "fields[2].default", "fields[3].default[1]",
+      "fields[4].default", "fields[5].default", "fields[6].default",
+    ]);
+  });
+
+  it("list の中のフィールドの default と、list 自体の default も検証する", async () => {
+    expect(await issuesOf([{ name: "rows", type: "list", default: [{ q: 1 }], fields: [
+      { name: "q", type: "text" }, { name: "n", type: "number", default: "x" },
+    ] }])).toEqual(["fields[0].fields[1].default", "fields[0].default[0].q"]);
+  });
+
+  it("正しい default は通り、update でも検証される", async () => {
+    await createCollection(admin(), { name: "ok", fields: [
+      { name: "kind", type: "select", options: ["a", "b"], default: "a" }, { name: "at", type: "datetime", default: "2026-01-01T00:00:00Z" },
+      { name: "extra", type: "json", default: { any: ["thing"] } },
+    ] });
+    await expect(updateCollection(admin(), "ok", { fields: [{ name: "kind", type: "select", options: ["a"], default: "b" }] }))
+      .rejects.toMatchObject({ code: "validation_failed", issues: [expect.objectContaining({ path: "fields[0].default" })] });
+  });
+});

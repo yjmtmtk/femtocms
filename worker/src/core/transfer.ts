@@ -173,6 +173,8 @@ interface PlannedMedia { index: number; record: MediaRecord; url?: string; inR2:
 interface Plan { collections: PlannedCollection[]; entries: PlannedEntry[]; media: PlannedMedia[]; existingCollectionIds: string[] }
 
 const isTimestamp = (v: unknown): v is string => typeof v === "string" && v !== "" && !Number.isNaN(Date.parse(v));
+/** Stored like every other write: UTC with milliseconds, so sorting and filtering compare like with like. Call after isTimestamp. */
+const iso = (v: string) => new Date(v).toISOString();
 const isCount = (v: unknown): v is number => typeof v === "number" && Number.isInteger(v) && v >= 0;
 
 /** Rows by id from a table, as one query (ids travel as a JSON array, so D1's bind-parameter limit does not matter). */
@@ -291,7 +293,7 @@ async function planImport(ctx: Ctx, data: unknown, replace: boolean): Promise<Pl
       record: {
         id: raw.id as string, filename, mimeType: normalizeMime(raw.mimeType as string) ?? mimeFromFilename(filename), size: 0,
         width: (raw.width as number | null | undefined) ?? null, height: (raw.height as number | null | undefined) ?? null,
-        alt: raw.alt as string, createdAt: raw.createdAt as string,
+        alt: raw.alt as string, createdAt: iso(raw.createdAt as string),
       },
     });
   });
@@ -336,10 +338,13 @@ async function planImport(ctx: Ctx, data: unknown, replace: boolean): Promise<Pl
     }
     if (typeof id === "string") entryIds.set(id, String(raw.collection));
     if (issues.length > before || !c) return;
+    const updatedAt = iso(raw.updatedAt as string);
+    const publishedAt = typeof raw.publishedAt === "string" ? iso(raw.publishedAt) : null;
     entries.push({
       index: i, collection: raw.collection as string, id: id as string, collectionId: c.id, slug: slug as string | null,
-      status: status as Status, data: normalized, createdAt: raw.createdAt as string, updatedAt: raw.updatedAt as string,
-      publishedAt: (raw.publishedAt as string | null | undefined) ?? null,
+      status: status as Status, data: normalized, createdAt: iso(raw.createdAt as string), updatedAt,
+      // A published entry always has a publication date (as publishEntry guarantees); the export's last update is the best guess.
+      publishedAt: publishedAt ?? (status === "published" ? updatedAt : null),
     });
   });
 

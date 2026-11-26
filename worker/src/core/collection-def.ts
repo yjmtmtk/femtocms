@@ -2,6 +2,7 @@ import { z } from "zod";
 import { FemtoError, type Issue } from "./errors";
 import { COLLECTION_NAME_RE, FIELD_NAME_RE, RESERVED_COLLECTION_NAMES } from "./ids";
 import type { CollectionInput, FieldDef } from "./types";
+import { validateData } from "./validate";
 
 const FIELD_TYPES = [
   "text", "textarea", "markdown", "number", "boolean", "datetime",
@@ -87,7 +88,16 @@ function checkFields(fields: FieldDef[], base: string, nested: boolean, issues: 
         checkFields(f.fields, at("fields"), true, issues);
       }
     }
+    if (f.default !== undefined) checkDefault(f, at("default"), issues);
   });
+}
+
+/** A default must pass the field's own validator (existence of media / entries is not checked: it may change later). */
+function checkDefault(f: FieldDef, path: string, issues: Issue[]): void {
+  const { default: value, required: _required, ...field } = f;
+  const r = validateData([field as FieldDef], { [f.name]: value }, { enforceRequired: false, applyDefaults: false });
+  const prefix = `data.${f.name}`; // field names have no dots or brackets, so the rest is the path inside the value
+  for (const issue of r.issues) issues.push({ ...issue, path: path + issue.path.slice(prefix.length) });
 }
 
 export function parseCollectionInput(input: unknown, mode: "create"): CollectionInput;

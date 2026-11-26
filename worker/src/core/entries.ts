@@ -265,7 +265,7 @@ export async function updateEntry(ctx: Ctx, collection: string, idOrSlug: string
   let patchData: Record<string, unknown> = {};
   let patchRefs: ValidateResult["refs"] | undefined;
   if (patch.data !== undefined) {
-    const p = validateData(c.fields, patch.data, { enforceRequired: false });
+    const p = validateData(c.fields, patch.data, { enforceRequired: false, applyDefaults: false });
     issues.push(...p.issues);
     patchRefs = p.refs;
     if (isObject(patch.data)) patchData = patch.data;

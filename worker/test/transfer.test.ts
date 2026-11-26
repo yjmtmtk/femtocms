@@ -178,6 +178,21 @@ describe("importData", () => {
     expect((await env.MEDIA.head(`media/${dump.media[0].id}`))?.size).toBe(fixtures.png.byteLength);
     expect((await getEntryRecord(admin(), "news", "winter")).status).toBe("published");
   });
+  it("日時は ISO 8601 (UTC, ミリ秒付き) にそろえ、公開済みで publishedAt が null なら updatedAt を使う", async () => {
+    await createCollection(admin(), newsDef);
+    const entry = (id: string, over: Record<string, unknown>) => ({
+      id, collection: "news", slug: null, status: "published", data: { title: "t" },
+      createdAt: "2026-01-02T03:04:05+09:00", updatedAt: "2026-01-03", publishedAt: "2026-01-02T12:00Z", ...over,
+    });
+    const dump = emptyDump({
+      entries: [entry("e_aaaaaaaaaaa1", {}), entry("e_aaaaaaaaaaa2", { publishedAt: null }), entry("e_aaaaaaaaaaa3", { status: "draft", publishedAt: null })] as never,
+    });
+    await importData(admin(), { data: dump, mode: "merge" });
+    const [a, b, c] = await Promise.all(["e_aaaaaaaaaaa1", "e_aaaaaaaaaaa2", "e_aaaaaaaaaaa3"].map((id) => getEntryRecord(admin(), "news", id)));
+    expect(a).toMatchObject({ createdAt: "2026-01-01T18:04:05.000Z", updatedAt: "2026-01-03T00:00:00.000Z", publishedAt: "2026-01-02T12:00:00.000Z" });
+    expect(b.publishedAt).toBe("2026-01-03T00:00:00.000Z");
+    expect(c.publishedAt).toBeNull();
+  });
   it("merge は既存を上書きし、ゴミ箱のものは戻す。同名コレクションは定義を上書きして id を保つ", async () => {
     const { entry } = await seed();
     const dump = await exportData(admin());

@@ -200,6 +200,14 @@ describe("updateEntry (R1, R8)", () => {
   });
 });
 
+it("更新のパッチ検証は default を当てない（パッチに無い画像の default の存在確認で失敗しない）", async () => {
+  await insertMedia("m_aaaaaaaaaaaa");
+  await updateCollection(admin(), "news", { fields: [...news.fields, { name: "cover", type: "image", default: "m_000000000000" }] });
+  const e = await createEntry(admin(), "news", { data: { title: "a", cover: "m_aaaaaaaaaaaa" } });
+  const u = await updateEntry(admin(), "news", e.id, { data: { title: "b" } });
+  expect(u.data).toEqual({ title: "b", cover: "m_aaaaaaaaaaaa" });
+});
+
 describe("default は作成時だけ適用される (R8)", () => {
   const withDefault = () => updateCollection(admin(), "news", { fields: [
     { name: "title", type: "text" }, { name: "category", type: "select", options: ["info", "event"], default: "info" }] });

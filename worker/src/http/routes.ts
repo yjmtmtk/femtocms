@@ -4,6 +4,7 @@ import { FemtoError, type Issue } from "../core/errors";
 import {
   createEntry, getEntryRecord, getSingle, listEntryRecords, publishEntry, putSingle, unpublishEntry, updateEntry,
 } from "../core/entries";
+import { buildOpenApi } from "../core/openapi";
 import { createKey, listKeys, revokeKey } from "../core/keys";
 import { requireRole } from "../core/context";
 import {
@@ -209,7 +210,13 @@ api.post("/reset", async (c) => {
   return c.json(await resetSite(c.get("ctx"), optionalString(body, "confirm")));
 });
 
-// Later tasks register /openapi.json HERE, before the `/:c` routes below.
+// --- openapi (must stay before `/:c`) -----------------------------------------------------------
+
+// Lists only the collections this caller's role can see. Public gets the shared cache, keyed callers `no-store`.
+api.get("/openapi.json", (c) => {
+  const ctx = c.get("ctx");
+  return withPublicCache(c, ctx, async () => buildOpenApi(await listCollections(ctx), ctx.origin, ctx.siteName));
+});
 
 // --- entries (/:c must stay after every fixed route above) --------------------------------------
 

@@ -340,6 +340,19 @@ const ALREADY_GONE: Record<"worker" | "d1" | "r2", RegExp> = {
   r2: /\[code: 10006\]|The specified bucket does not exist/i,
 };
 
+const BUCKET_NOT_EMPTY = /\[code: 10008\]|bucket you tried to delete is not empty/i;
+
+/** The site was emptied through the API, yet R2 still holds objects no media row points at (e.g. left by an interrupted upload). */
+function bucketNotEmpty(site: Site, r: RunResult): Error {
+  return new Error(
+    `R2 バケット ${site.bucket} が空でないため削除できませんでした。サイトを空にした後も、どのメディアにも属さないファイルが R2 に残っています（途中で失敗したアップロードなど）。\n` +
+      "次のどちらかで中身を消してから、もう一度 femtocms destroy を実行してください（Worker・D1・プロファイルはまだ残してあります）:\n" +
+      `  - キーごとに: npx wrangler r2 object delete ${site.bucket}/<key> --remote\n` +
+      `  - ダッシュボードで: https://dash.cloudflare.com/${site.accountId}/r2/default/buckets/${site.bucket}\n` +
+      outputTail(r),
+  );
+}
+
 /**
  * Empties the site through its API so the R2 bucket can be deleted. Returns normally when done or when the site is
  * clearly absent: the connection fails (no such host, refused, timeout) or the host itself answers 404 with a non-femtocms
@@ -398,6 +411,7 @@ export async function runDestroy(opts: {
       log(`  ${label}は既にありませんでした`);
       continue;
     }
+    if (kind === "r2" && BUCKET_NOT_EMPTY.test(`${r.stdout}\n${r.stderr}`)) throw bucketNotEmpty(site, r);
     throw failure(`${label}の削除`, r);
   }
 

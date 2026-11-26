@@ -77,19 +77,33 @@ export async function putMediaObject(ctx: Ctx, input: UploadInput, id: string): 
   };
 }
 
+/** Whether a media row (trash included) or an R2 object already uses this id. */
+export async function mediaIdInUse(ctx: Ctx, id: string): Promise<boolean> {
+  const row = await ctx.db.prepare("SELECT 1 AS x FROM media WHERE id = ?").bind(id).first();
+  return row !== null || (await ctx.bucket.head(r2Key(id))) !== null;
+}
+
 export async function uploadMedia(ctx: Ctx, input: UploadInput, internal?: { id?: string }): Promise<MediaRecord> {
   requireRole(ctx, "admin");
   const id = internal?.id ?? newId("m");
+  // A caller-chosen id may already be in use (import overwrite): then a failed write must not delete that object.
+  const existed = internal?.id !== undefined && (await mediaIdInUse(ctx, id));
   const m = await putMediaObject(ctx, input, id);
   // internal.id may name an existing row (import): overwrite it, keep its created_at, and bring it back from the trash.
-  await ctx.db
-    .prepare(
-      "INSERT INTO media (id, filename, mime_type, size, width, height, alt, created_at, deleted_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL) " +
-        "ON CONFLICT(id) DO UPDATE SET filename = excluded.filename, mime_type = excluded.mime_type, size = excluded.size, " +
-        "width = excluded.width, height = excluded.height, alt = excluded.alt, deleted_at = NULL",
-    )
-    .bind(id, m.filename, m.mimeType, m.size, m.width, m.height, m.alt, m.createdAt)
-    .run();
+  try {
+    await ctx.db
+      .prepare(
+        "INSERT INTO media (id, filename, mime_type, size, width, height, alt, created_at, deleted_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL) " +
+          "ON CONFLICT(id) DO UPDATE SET filename = excluded.filename, mime_type = excluded.mime_type, size = excluded.size, " +
+          "width = excluded.width, height = excluded.height, alt = excluded.alt, deleted_at = NULL",
+      )
+      .bind(id, m.filename, m.mimeType, m.size, m.width, m.height, m.alt, m.createdAt)
+      .run();
+  } catch (e) {
+    // No row points at the new object, so nothing could ever delete it (and a non-empty bucket blocks destroy).
+    if (!existed) await ctx.bucket.delete(r2Key(id)).catch(() => {});
+    throw e;
+  }
   await bumpVersion(ctx);
   return toRecord((await findRow(ctx, id))!);
 }

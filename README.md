@@ -226,7 +226,7 @@ Deploys the Worker bundled with that version of the package to your account and 
 npx femtocms destroy
 ```
 
-After you type the Worker name, femtocms empties the site (everything is moved to the trash and the trash is emptied, which deletes the R2 files), then deletes the R2 bucket, the Worker and the D1 database, and removes the saved profile. This cannot be undone. Take an `export` first if you may need the data. Only the CLI can do this: the running CMS has no permission to manage your Cloudflare account.
+After you type the Worker name, femtocms empties the site (everything is moved to the trash and the trash is emptied, which deletes the R2 files), then deletes the R2 bucket, the Worker and the D1 database, and removes the saved profile. This cannot be undone. Take an `export` first if you may need the data. If the bucket still holds files that belong to no media (for example from an interrupted upload), `destroy` stops before deleting the Worker and the database, keeps the profile, and tells you how to remove those files (`wrangler r2 object delete` or the dashboard) before you run it again. Only the CLI can do this: the running CMS has no permission to manage your Cloudflare account.
 
 ## Security notes
 

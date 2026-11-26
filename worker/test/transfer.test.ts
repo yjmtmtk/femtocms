@@ -408,6 +408,38 @@ describe("importData", () => {
       expect(await issuesOf(importData(admin(), { data: dump, mode: "merge" }))).toEqual(["media[1].url"]);
       expect(await snapshot()).toEqual(before);
     });
+    it("メディアの取得に失敗したら、この取り込みが新しく書いた R2 オブジェクトは消し、前からあったものは残す", async () => {
+      await seed();
+      const dump = await exportData(admin());
+      const kept = await uploadMedia(admin(), { bytes: fixtures.gif, filename: "kept.gif" });
+      const base = dump.media[0];
+      dump.media = [
+        { ...base, id: "m_aaaaaaaaaaa1", url: "https://example.com/new.png" }, // brand new id: written, then removed
+        { ...base, id: kept.id, url: "https://example.com/over.png" }, // existing row + object: overwritten, kept
+        { ...base, id: "m_aaaaaaaaaaa2", url: "https://example.com/missing.png" }, // fails
+      ];
+      dump.entries = [];
+      vi.spyOn(globalThis, "fetch").mockImplementation(async (input) =>
+        String(input).includes("missing") ? new Response("no", { status: 404 }) : new Response(fixtures.png, { headers: { "content-type": "image/png" } }));
+      expect(await issuesOf(importData(admin(), { data: dump, mode: "merge" }))).toEqual(["media[2].url"]);
+      const keys = (await env.MEDIA.list({ prefix: "media/" })).objects.map((o) => o.key).sort();
+      expect(keys).toEqual([`media/${base.id}`, `media/${kept.id}`].sort());
+    });
+    it("最後の D1 の書き込みが失敗しても、新しく書いた R2 オブジェクトは消す", async () => {
+      const ctx = admin();
+      const db = new Proxy(ctx.db, { get(t, p) {
+        if (p === "batch") return async () => { throw new Error("D1_ERROR: simulated"); };
+        const v = Reflect.get(t, p) as unknown;
+        return typeof v === "function" ? v.bind(t) : v;
+      } });
+      mockPng();
+      const dump = emptyDump({ media: [{
+        id: "m_aaaaaaaaaaa3", filename: "a.png", mimeType: "image/png", size: 1, width: null, height: null, alt: "",
+        createdAt: "2026-01-01T00:00:00.000Z", url: "https://example.com/a.png",
+      }] });
+      await expect(importData({ ...ctx, db }, { data: dump, mode: "merge" })).rejects.toThrow("simulated");
+      expect((await env.MEDIA.list({ prefix: "media/" })).objects).toEqual([]);
+    });
     it("replace でもメディア取得に失敗したら既存はそのまま（ゴミ箱に移さない）", async () => {
       await seed();
       const dump = await exportData(admin());

@@ -427,14 +427,20 @@ describe("runDestroy", () => {
     expect(loadConfig().profiles.femtocms).toBeDefined();
   });
 
-  it("R2 の削除に失敗（空でない）したら Worker と D1 は削除せず、プロファイルを残す", async () => {
-    seedProfile();
-    const r = fakeRunner({ ...destroyReplies, "r2 bucket delete": bad("The bucket you tried to delete is not empty [code: 10008]") });
-    await expect(
-      runDestroy({ profile: "femtocms", runner: r.run, prompt: fakePrompt({ texts: ["femtocms"] }).prompt, log: () => {}, fetch: fakeFetch().fn }),
-    ).rejects.toThrow(/not empty/);
-    expect(r.names()).toEqual(["r2 bucket"]);
-    expect(loadConfig().profiles.femtocms).toBeDefined();
+  it("R2 の削除に失敗（空でない）したら Worker と D1 は削除せず、残ったオブジェクトの消し方を示してプロファイルを残す", async () => {
+    for (const stderr of ["The bucket you tried to delete is not empty [code: 10008]", "✘ [ERROR] [code: 10008]"]) {
+      seedProfile();
+      const r = fakeRunner({ ...destroyReplies, "r2 bucket delete": bad(stderr) });
+      const err = await runDestroy({ profile: "femtocms", runner: r.run, prompt: fakePrompt({ texts: ["femtocms"] }).prompt, log: () => {}, fetch: fakeFetch().fn })
+        .then(() => null, (e: Error) => e);
+      expect(err?.message).toContain("femtocms-femtocms");
+      expect(err?.message).toContain("wrangler r2 object delete femtocms-femtocms/<key> --remote");
+      expect(err?.message).toContain("https://dash.cloudflare.com/acc1/r2/default/buckets/femtocms-femtocms");
+      expect(err?.message).toContain("femtocms destroy");
+      expect(err?.message).toContain("10008"); // wrangler's own output is kept
+      expect(r.names()).toEqual(["r2 bucket"]);
+      expect(loadConfig().profiles.femtocms).toBeDefined();
+    }
   });
 });
 

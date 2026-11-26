@@ -168,7 +168,8 @@ interface PlannedEntry {
   id: string; collectionId: string; slug: string | null; status: Status; data: Record<string, unknown>;
   createdAt: string; updatedAt: string; publishedAt: string | null;
 }
-interface PlannedMedia { index: number; record: MediaRecord; url?: string; inR2: boolean }
+/** `preexisting`: a media row (trash included) or an R2 object already used this id before the import. */
+interface PlannedMedia { index: number; record: MediaRecord; url?: string; inR2: boolean; preexisting: boolean }
 interface Plan { collections: PlannedCollection[]; entries: PlannedEntry[]; media: PlannedMedia[]; existingCollectionIds: string[] }
 
 const isTimestamp = (v: unknown): v is string => typeof v === "string" && v !== "" && !Number.isNaN(Date.parse(v));
@@ -286,7 +287,7 @@ async function planImport(ctx: Ctx, data: unknown, replace: boolean): Promise<Pl
     // Same clean-up as every upload path. `size` of the export is ignored: it comes from the bytes (fetched) or from R2 (head).
     const filename = sanitizeFilename(raw.filename as string);
     media.push({
-      index: i, url, inR2: false,
+      index: i, url, inR2: false, preexisting: false,
       record: {
         id: raw.id as string, filename, mimeType: normalizeMime(raw.mimeType as string) ?? mimeFromFilename(filename), size: 0,
         width: (raw.width as number | null | undefined) ?? null, height: (raw.height as number | null | undefined) ?? null,
@@ -400,9 +401,15 @@ async function planImport(ctx: Ctx, data: unknown, replace: boolean): Promise<Pl
     }
   }
 
+  // --- what R2 / the media table already hold under the imported ids (also decides what a failed import may delete)
+  const sizes = await r2Sizes(ctx, new Set(media.map((m) => m.record.id)));
+  const rows = new Set((await select<{ id: string }>(
+    ctx, "SELECT id FROM media WHERE id IN (SELECT value FROM json_each(?))", media.map((m) => m.record.id),
+  )).map((r) => r.id));
+  for (const m of media) m.preexisting = sizes.has(m.record.id) || rows.has(m.record.id);
+
   // --- media files that are not fetched: R2 must already hold them
   const local = media.filter((m) => !m.url || new URL(m.url).origin === ctx.origin);
-  const sizes = await r2Sizes(ctx, new Set(local.map((m) => m.record.id)));
   for (const m of local) {
     const size = sizes.get(m.record.id);
     if (size !== undefined) {
@@ -420,22 +427,41 @@ async function planImport(ctx: Ctx, data: unknown, replace: boolean): Promise<Pl
   };
 }
 
-/** Downloads every media file with a url into R2. Any failure is reported against its media path; D1 is still untouched. */
-async function storeMedia(ctx: Ctx, media: PlannedMedia[]): Promise<void> {
+/**
+ * Downloads every media file with a url into R2 and returns the ids it wrote. Any failure is reported against its media
+ * path; D1 is still untouched. On failure, the objects written here for brand-new ids are deleted again (no row would
+ * ever point at them, and a non-empty bucket blocks destroy). Objects under ids that existed before are left alone:
+ * they may already have been overwritten, but deleting them would lose the file the existing row points at.
+ */
+async function storeMedia(ctx: Ctx, media: PlannedMedia[]): Promise<PlannedMedia[]> {
   const issues: Issue[] = [];
-  for (const m of media) {
-    if (m.inR2 || !m.url) continue;
-    try {
-      const { bytes } = await fetchRemoteMedia(m.url);
-      // The export's own metadata wins (served content types are forced to octet-stream for unsafe types); size and dimensions come from the bytes.
-      const stored = await putMediaObject(ctx, { bytes, filename: m.record.filename, mimeType: m.record.mimeType, alt: m.record.alt }, m.record.id);
-      m.record = { ...stored, createdAt: m.record.createdAt };
-    } catch (e) {
-      if (!(e instanceof FemtoError)) throw e;
-      issues.push({ path: `media[${m.index}].url`, message: e.message, ...(e.hint ? { expected: e.hint } : {}) });
+  const written: PlannedMedia[] = [];
+  try {
+    for (const m of media) {
+      if (m.inR2 || !m.url) continue;
+      try {
+        const { bytes } = await fetchRemoteMedia(m.url);
+        // The export's own metadata wins (served content types are forced to octet-stream for unsafe types); size and dimensions come from the bytes.
+        const stored = await putMediaObject(ctx, { bytes, filename: m.record.filename, mimeType: m.record.mimeType, alt: m.record.alt }, m.record.id);
+        written.push(m);
+        m.record = { ...stored, createdAt: m.record.createdAt };
+      } catch (e) {
+        if (!(e instanceof FemtoError)) throw e;
+        issues.push({ path: `media[${m.index}].url`, message: e.message, ...(e.hint ? { expected: e.hint } : {}) });
+      }
     }
+    if (issues.length) throw invalid(issues, "メディアを取得できませんでした。D1 には何も書き込んでいません");
+  } catch (e) {
+    await removeNewObjects(ctx, written);
+    throw e;
   }
-  if (issues.length) throw invalid(issues, "メディアを取得できませんでした。D1 には何も書き込んでいません");
+  return written;
+}
+
+/** Deletes the R2 objects of `written` whose ids were not in use before the import. */
+async function removeNewObjects(ctx: Ctx, written: PlannedMedia[]): Promise<void> {
+  const keys = written.filter((m) => !m.preexisting).map((m) => r2Key(m.record.id));
+  if (keys.length) await ctx.bucket.delete(keys).catch(() => {});
 }
 
 /** One INSERT ... SELECT per chunk of rows: the rows are a JSON array in a single bound parameter, so a big import stays a handful of statements. */
@@ -472,8 +498,8 @@ export async function importData(
   if (replace) requireConfirm(ctx, input.confirm);
 
   const plan = await planImport(ctx, input.data, replace);
-  // R2 objects written here stay if a later media file fails: they are keyed by the import's own ids and harmless (a retry overwrites them).
-  await storeMedia(ctx, plan.media);
+  // storeMedia removes what it wrote for new ids when a media file fails; the D1 batch below does the same if it fails.
+  const written = await storeMedia(ctx, plan.media);
 
   const now = ctx.now().toISOString();
   const statements: D1PreparedStatement[] = [];
@@ -522,7 +548,12 @@ export async function importData(
       )),
     ),
   );
-  await ctx.db.batch(statements); // one transaction: all of it or none of it
+  try {
+    await ctx.db.batch(statements); // one transaction: all of it or none of it
+  } catch (e) {
+    await removeNewObjects(ctx, written);
+    throw e;
+  }
   await bumpVersion(ctx);
   return { collections: plan.collections.length, entries: plan.entries.length, media: plan.media.length };
 }

@@ -97,6 +97,42 @@ describe("uploadMedia", () => {
   });
 });
 
+describe("uploadMedia: D1 への書き込みが失敗したとき (R2 に孤児を残さない)", () => {
+  /** An admin ctx whose INSERT INTO media fails. */
+  const failingInsert = () => {
+    const ctx = admin();
+    const db = new Proxy(ctx.db, { get(t, p) {
+      const v = Reflect.get(t, p) as unknown;
+      if (p === "prepare") {
+        return (sql: string) => {
+          if (/^INSERT INTO media/i.test(sql)) throw new Error("D1_ERROR: simulated");
+          return t.prepare(sql);
+        };
+      }
+      return typeof v === "function" ? v.bind(t) : v;
+    } });
+    return { ...ctx, db } as typeof ctx;
+  };
+  const keys = async () => (await env.MEDIA.list({ prefix: "media/" })).objects.map((o) => o.key);
+
+  it("新しい id なら R2 のオブジェクトを消してから元のエラーを投げる", async () => {
+    await expect(uploadMedia(failingInsert(), { bytes: fixtures.png, filename: "a.png" })).rejects.toThrow("simulated");
+    expect(await keys()).toEqual([]);
+    await expect(uploadMedia(failingInsert(), { bytes: fixtures.png, filename: "a.png" }, { id: "m_cccccccccccc" })).rejects.toThrow("simulated");
+    expect(await keys()).toEqual([]);
+  });
+
+  it("同じ id の行か R2 オブジェクトが前からあれば（import の上書き）、オブジェクトは消さない", async () => {
+    await uploadMedia(admin(), { bytes: fixtures.png, filename: "a.png" }, { id: "m_dddddddddddd" });
+    await expect(uploadMedia(failingInsert(), { bytes: fixtures.gif, filename: "b.gif" }, { id: "m_dddddddddddd" })).rejects.toThrow("simulated");
+    expect(await keys()).toEqual(["media/m_dddddddddddd"]);
+
+    await env.MEDIA.put("media/m_eeeeeeeeeeee", fixtures.png); // R2 only, no row (CLI import PUT before a failed import)
+    await expect(uploadMedia(failingInsert(), { bytes: fixtures.gif, filename: "b.gif" }, { id: "m_eeeeeeeeeeee" })).rejects.toThrow("simulated");
+    expect(await keys()).toContain("media/m_eeeeeeeeeeee");
+  });
+});
+
 describe("uploadMediaBase64", () => {
   it("base64 から保存できる", async () => {
     const m = await uploadMediaBase64(admin(), { base64: b64(fixtures.png), filename: "a.png" });

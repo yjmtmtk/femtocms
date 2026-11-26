@@ -185,9 +185,10 @@ The MCP endpoint is `https://<your-site>/mcp` (Streamable HTTP, stateless) and n
 | Attribute | Meaning |
 |---|---|
 | `data-femtocms` | Collection name (required). |
-| `data-limit` | Number of entries, 1 to 100 (default 5). Newest published first. |
+| `data-limit` | Number of entries, 1 to 100 (default 5). |
+| `data-sort` | Order, as in the API's `sort`: field names separated by commas, `-` for descending, e.g. `order` or `-price,title` (default `-publishedAt`, newest first). |
 | `data-fields` | Comma-separated fields to show, in order. Default `publishedAt,title`. `publishedAt`, `createdAt` and `updatedAt` are shown as dates. A data field is shown as text when its value is a string or a number (text, textarea, number, datetime, a single select, and the Markdown source), and an image field as an `<img>`; other values (lists, multiple selections, references, JSON) are skipped. |
-| `data-href` | Link template such as `/news.html?slug={slug}` or `/news?id={id}`. Without it, items are not links. femtocms does not serve article pages itself; use the [article embed](#article-page) on your own page. |
+| `data-href` | Link template such as `/news.html?slug={slug}` or `/news?id={id}`; any field name works in braces and values are URL-encoded. Without it, items are not links. femtocms does not serve article pages itself; use the [article embed](#article-page) on your own page. |
 | `data-locale` | Locale for dates (default: the page's `<html lang>`). |
 | `data-empty` | Message shown when there are no entries. |
 | `data-filter` | Only entries that match, e.g. `category=menu` or `category=event&price[gte]=1000` (same operators as the API's `filter`: `eq ne lt lte gt gte contains in`). |
@@ -218,8 +219,11 @@ and point the list at it with `data-href="news.html?slug={slug}"`. The page read
 | `data-document-title` | Present: set the page's `<title>` to `<article title> \| <current title>`. |
 | `data-locale` | Locale for dates. |
 | `data-empty` | Message shown when the entry does not exist, is a draft, or no slug was given. |
+| `data-prevnext` | Present: below the entry, link to the entry published just before it (`a.fcms-prev`, older) and just after it (`a.fcms-next`, newer) inside `<nav class="fcms-prevnext">`. |
+| `data-href` | Link template for those links (e.g. `/news/{slug}`). Default: this page with `?slug=` swapped. |
+| `data-filter` | Limits which entries count as previous / next, e.g. `category=menu`. |
 
-Drafts are not shown. To check a draft on your real page design, add the token from `femtocms preview` (or the MCP tool `get_preview_url`) to the page URL: `news.html?slug=<slug>&preview=<token>`. Markdown HTML is produced by the CMS with raw HTML escaped and unsafe links removed; it is the only markup the script inserts. The content is rendered by JavaScript, so search engines may not index it as well as server-rendered pages.
+Without a slug, a `single` collection shows its one entry, so `<div data-femtocms-entry="about"></div>` works for an About page. Drafts are not shown. To check a draft on your real page design, add the token from `femtocms preview` (or the MCP tool `get_preview_url`) to the page URL: `news.html?slug=<slug>&preview=<token>`. Markdown HTML is produced by the CMS with raw HTML escaped and unsafe links removed; it is the only markup the script inserts. The content is rendered by JavaScript, so search engines may not index it as well as server-rendered pages.
 
 ### Templates: your own markup
 
@@ -285,6 +289,35 @@ A list with `data-pager` can hold a second template, `<template data-pager>`. It
 | with `more` | `loaded` (items shown), `total`, `remaining` |
 
 `data-page="prev"`, `"next"`, `"first"`, `"last"`, and a bare `data-page` inside `data-each="pages"`, get the link to that page (keeping the page URL's other parameters). When there is no previous or next page, the `href` is removed and `aria-disabled="true"` is set, so CSS can dim or hide it. The link to the current page gets `aria-current="page"`. Clicking an element with `data-more` loads the next batch (a link does not navigate); it is `disabled` while loading, and the whole pager is removed once everything is shown. Nothing is shown when everything fits on one page.
+
+#### Previous / next template
+
+`<template data-prevnext>` replaces the built-in previous / next links (having the template is enough; `data-prevnext` is optional then). Inside, `prev` is the older entry and `next` the newer one, so `data-field="prev.title"` or `data-if="next"` work, and `data-page="prev"` / `"next"` sets the link (or `aria-disabled="true"` when there is none). The filled template goes below the entry inside `<div class="fcms-prevnext-custom">`. Only published entries look for neighbours.
+
+```html
+<div data-femtocms-entry="news">
+  <template> …the entry… </template>
+  <template data-prevnext>
+    <nav>
+      <a data-if="prev" data-page="prev">← <span data-field="prev.title"></span></a>
+      <a data-if="next" data-page="next"><span data-field="next.title"></span> →</a>
+    </nav>
+  </template>
+</div>
+```
+
+#### Loading, empty and error states
+
+Anything you put inside the element besides templates (say `<p>Loading…</p>`) shows until the content arrives. `<template data-empty>` replaces the `data-empty` message when a list has no entries or an entry is not found, and `<template data-error>` is shown when loading fails (without it, the element is left as it was and the error goes to the console). Templates are told apart by their attribute, not their order.
+
+```html
+<div data-femtocms="news">
+  <p>Loading…</p>
+  <template> …one entry… </template>
+  <template data-empty><p>No news yet. <a href="/">Back to top</a></p></template>
+  <template data-error><p>Could not load the news.</p></template>
+</div>
+```
 
 ## Caching
 

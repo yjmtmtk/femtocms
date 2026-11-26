@@ -1,12 +1,26 @@
-/* femtocms embed: renders a list into every [data-femtocms] element and one entry into every [data-femtocms-entry] element.
-   A <template> child replaces the built-in markup (data-field / data-if / data-class / data-href / data-each), and a
-   <template data-pager> child replaces the built-in pager (data-page / data-more). No dependencies. */
+/* femtocms embed. No dependencies.
+   [data-femtocms="<collection>"]        renders a list of entries.
+   [data-femtocms-entry="<collection>"]  renders one entry: ?slug= in the page URL, data-slug, or the entry of a "single" collection.
+   <template> children replace the built-in markup. Their role comes from an attribute:
+     <template>                one entry       (data-field / data-if / data-class / data-href / <template data-each>)
+     <template data-pager>     page numbers or "load more" (data-page / data-more)
+     <template data-prevnext>  links to the older and newer entry (data-page)
+     <template data-empty>     nothing to show
+     <template data-error>     loading failed */
 (function () {
   "use strict";
   if (window.femtocms) return;
 
   var script = document.currentScript;
   var DATE_FIELDS = { publishedAt: 1, createdAt: 1, updatedAt: 1 };
+  var BUILTIN = { id: 1, slug: 1, status: 1, publishedAt: 1, createdAt: 1, updatedAt: 1 };
+  var HEADINGS = { h1: 1, h2: 1, h3: 1, h4: 1, h5: 1, h6: 1 };
+  var NAME_RE = /^[A-Za-z][A-Za-z0-9_]*$/;
+  var ENTRY_ID_RE = /^e_[0-9a-z]{12}$/;
+  var PLACEHOLDER_RE = /\{([A-Za-z][A-Za-z0-9_.]*)\}/g;
+  var SORT_RE = /^-?[A-Za-z][A-Za-z0-9_]*(,-?[A-Za-z][A-Za-z0-9_]*)*$/;
+  var DEFAULT_SORT = "-publishedAt";
+  var ROLES = ["pager", "prevnext", "empty", "error"];
   var CSS = [
     ":where(.fcms-list){list-style:none;margin:0;padding:0}",
     ":where(.fcms-item){margin:0;padding:.5em 0}",
@@ -22,8 +36,12 @@
     ":where(.fcms-pager-current){font-weight:700}",
     ":where(.fcms-more){margin-top:1em;font:inherit;cursor:pointer}",
     ":where(ul.fcms-items){list-style:none;margin:0;padding:0}",
+    ":where(.fcms-prevnext){display:flex;flex-wrap:wrap;justify-content:space-between;gap:1em;margin-top:2em}",
+    ":where(.fcms-prevnext a){color:inherit}",
+    ":where(.fcms-next){margin-left:auto;text-align:right}",
   ].join("\n");
-  var HEADINGS = { h1: 1, h2: 1, h3: 1, h4: 1, h5: 1, h6: 1 };
+
+  // ---- basics ------------------------------------------------------------------------------
 
   function warn(err) {
     if (typeof console !== "undefined" && console.warn) console.warn("[femtocms]", err);
@@ -50,6 +68,69 @@
     return Math.min(100, Math.max(1, n));
   }
 
+  function sortOf(el) {
+    var raw = (el.getAttribute("data-sort") || "").replace(/\s+/g, "");
+    if (!raw) return DEFAULT_SORT;
+    if (SORT_RE.test(raw)) return raw;
+    warn("ignored data-sort: " + raw);
+    return DEFAULT_SORT;
+  }
+
+  function localeOf(el) {
+    return el.getAttribute("data-locale") || document.documentElement.lang || "";
+  }
+
+  function isJapanese(el) {
+    return /^ja/i.test(localeOf(el));
+  }
+
+  function formatDate(d, locale) {
+    try {
+      return d.toLocaleDateString(locale || undefined);
+    } catch (e) {
+      return d.toLocaleDateString();
+    }
+  }
+
+  function isMedia(v) {
+    return !!v && typeof v === "object" && typeof v.url === "string" && /^https?:\/\//i.test(v.url);
+  }
+
+  function own(o, k) {
+    return o && typeof o === "object" && Object.prototype.hasOwnProperty.call(o, k) ? o[k] : undefined;
+  }
+
+  function isEntry(v) {
+    return !!v && typeof v === "object" && !Array.isArray(v) && !!v.data && typeof v.data === "object";
+  }
+
+  function remove(node) {
+    if (node && node.parentNode) node.parentNode.removeChild(node);
+  }
+
+  function className(name) {
+    return name.replace(/[^a-zA-Z0-9_-]/g, "");
+  }
+
+  // Only relative URLs and http(s) are linkable; control characters are stripped first because browsers ignore them inside schemes.
+  function safeHref(href) {
+    var probe = href.replace(/[\u0000- ]/g, "");
+    if (!probe) return "";
+    if (/^[a-zA-Z][a-zA-Z0-9+.\-]*:/.test(probe) && !/^https?:/i.test(probe)) return "";
+    return href.trim();
+  }
+
+  // "news.html?slug={slug}&c={category}" — values are URL-encoded; {slug} falls back to the id.
+  function hrefFrom(template, scope) {
+    return safeHref(template.replace(PLACEHOLDER_RE, function (_, name) {
+      var v = lookup(scope, name).value;
+      if (name === "slug" && !present(v)) v = lookup(scope, "id").value;
+      return encodeURIComponent(textOf(v));
+    }));
+  }
+
+  // ---- URLs --------------------------------------------------------------------------------
+
   // data-filter="category=menu&price[gte]=1000" → filter[category]=menu & filter[price][gte]=1000
   function applyFilter(url, raw) {
     if (!raw) return;
@@ -67,141 +148,78 @@
     if (expand && expand.length) url.searchParams.set("expand", expand.join(","));
   }
 
-  function buildUrl(collection, limit, offset, filter, expand) {
-    var url = new URL(base + "/api/" + encodeURIComponent(collection));
-    url.searchParams.set("limit", String(limit));
-    url.searchParams.set("sort", "-publishedAt");
-    if (offset !== null) url.searchParams.set("offset", String(offset));
-    applyFilter(url, filter);
+  function collectionUrl(collection) {
+    return new URL(base + "/api/" + encodeURIComponent(collection));
+  }
+
+  // q: { limit, sort, offset (null for none), filter, expand }
+  function listUrl(collection, q) {
+    var url = collectionUrl(collection);
+    url.searchParams.set("limit", String(q.limit));
+    url.searchParams.set("sort", q.sort);
+    if (q.offset !== null) url.searchParams.set("offset", String(q.offset));
+    applyFilter(url, q.filter);
+    applyExpand(url, q.expand);
+    return url.toString();
+  }
+
+  function entryUrl(collection, key, expand) {
+    var url = new URL(base + "/api/" + encodeURIComponent(collection) + "/" + encodeURIComponent(key));
+    var preview = new URLSearchParams(window.location.search).get("preview");
+    if (preview) url.searchParams.set("preview", preview);
     applyExpand(url, expand);
     return url.toString();
   }
 
-  function isJapanese(el) {
-    return /^ja/i.test(el.getAttribute("data-locale") || document.documentElement.lang || "");
+  // No key: a "single" collection answers with its entry; a list collection answers with { items } (= nothing to show).
+  function singleUrl(collection, expand) {
+    var url = collectionUrl(collection);
+    url.searchParams.set("limit", "1");
+    applyExpand(url, expand);
+    return url.toString();
   }
 
-  function pageNumber(el) {
-    var n = parseInt(new URLSearchParams(window.location.search).get(el.getAttribute("data-page-param") || "page") || "", 10);
-    return isNaN(n) || n < 1 ? 1 : n;
+  // The entry published just before ("lt") or just after ("gt") the given time.
+  function neighborUrl(collection, op, publishedAt, filter) {
+    var url = collectionUrl(collection);
+    url.searchParams.set("limit", "1");
+    url.searchParams.set("sort", op === "lt" ? "-publishedAt" : "publishedAt");
+    applyFilter(url, filter);
+    url.searchParams.set("filter[publishedAt][" + op + "]", publishedAt);
+    return url.toString();
   }
 
-  // 1 … 9 10 11 … 20 : first, last, and the current page with its neighbours.
-  function pageWindow(current, pages) {
-    var out = [];
-    for (var p = 1; p <= pages; p++) {
-      if (pages <= 7 || p === 1 || p === pages || Math.abs(p - current) <= 1) out.push(p);
-      else if (out[out.length - 1] !== 0) out.push(0);
-    }
-    return out;
+  // missingOk: a 404 resolves to null (an entry that does not exist) instead of failing.
+  function getJson(url, what, missingOk) {
+    return fetch(url, { credentials: "omit" }).then(function (res) {
+      if (missingOk && res.status === 404) return null;
+      if (!res.ok) throw new Error("HTTP " + res.status + " for " + what);
+      return res.json();
+    });
   }
 
-  // Only relative URLs and http(s) are linkable; control characters are stripped first because browsers ignore them inside schemes.
-  function safeHref(href) {
-    var probe = href.replace(/[\u0000- ]/g, "");
-    if (!probe) return "";
-    if (/^[a-zA-Z][a-zA-Z0-9+.\-]*:/.test(probe) && !/^https?:/i.test(probe)) return "";
-    return href.trim();
-  }
-
-  function buildHref(template, item) {
-    if (!template) return "";
-    var slug = item.slug || item.id || "";
-    var id = item.id || "";
-    return safeHref(template.replace(/\{slug\}/g, encodeURIComponent(slug)).replace(/\{id\}/g, encodeURIComponent(id)));
-  }
-
-  function className(name) {
-    return name.replace(/[^a-zA-Z0-9_-]/g, "");
-  }
-
-  function formatDate(d, locale) {
-    try {
-      return d.toLocaleDateString(locale || undefined);
-    } catch (e) {
-      return d.toLocaleDateString();
-    }
-  }
-
-  function isMedia(v) {
-    return !!v && typeof v === "object" && typeof v.url === "string" && /^https?:\/\//i.test(v.url);
-  }
-
-  function localeOf(el) {
-    return el.getAttribute("data-locale") || document.documentElement.lang || "";
-  }
-
-  function renderField(name, item, locale) {
-    if (DATE_FIELDS[name] === 1) {
-      var raw = item[name];
-      var d = typeof raw === "string" ? new Date(raw) : null;
-      if (!d || isNaN(d.getTime())) return null;
-      var time = document.createElement("time");
-      time.className = "fcms-date";
-      time.setAttribute("datetime", raw);
-      time.textContent = formatDate(d, locale);
-      return time;
-    }
-    var cls = className(name);
-    if (!cls) return null;
-    var value = item.data ? item.data[name] : undefined;
-    if (typeof value === "string" || typeof value === "number") {
-      var text = String(value);
-      if (!text) return null;
-      var span = document.createElement("span");
-      span.className = name === "title" ? "fcms-title" : "fcms-field fcms-field-" + cls;
-      span.textContent = text;
-      return span;
-    }
-    if (isMedia(value)) {
-      var img = document.createElement("img");
-      img.className = "fcms-image";
-      img.setAttribute("src", value.url);
-      img.setAttribute("alt", typeof value.alt === "string" ? value.alt : "");
-      img.setAttribute("loading", "lazy");
-      return img;
-    }
-    return null;
-  }
-
-  // ---- templates ----------------------------------------------------------------------------
+  // ---- templates ---------------------------------------------------------------------------
   // Values go in as text. The only markup inserted is item.html[field] (Markdown the CMS rendered with raw HTML escaped).
-  var BUILTIN = { id: 1, slug: 1, status: 1, publishedAt: 1, createdAt: 1, updatedAt: 1 };
-  var NAME_RE = /^[A-Za-z][A-Za-z0-9_]*$/;
-  var ENTRY_ID_RE = /^e_[0-9a-z]{12}$/;
-  var PLACEHOLDER_RE = /\{([A-Za-z][A-Za-z0-9_.]*)\}/g;
-  var templates = new WeakMap();
-  var pagerTemplates = new WeakMap();
 
-  // The element's own <template> children; remembered, because rendering replaces the element's children.
-  function findTemplate(el, cache, pager) {
+  var templateSets = new WeakMap();
+
+  // The element's own <template> children by role; remembered, because rendering replaces the element's children.
+  function templatesOf(el) {
+    var found = null;
     for (var c = el.firstElementChild; c; c = c.nextElementSibling) {
-      if (c.tagName === "TEMPLATE" && !c.hasAttribute("data-each") && c.hasAttribute("data-pager") === pager) {
-        cache.set(el, c);
-        break;
+      if (c.tagName !== "TEMPLATE" || c.hasAttribute("data-each")) continue;
+      var role = "item";
+      for (var i = 0; i < ROLES.length; i++) {
+        if (c.hasAttribute("data-" + ROLES[i])) {
+          role = ROLES[i];
+          break;
+        }
       }
+      found = found || {};
+      if (!found[role]) found[role] = c;
     }
-    return cache.get(el) || null;
-  }
-
-  function templateOf(el) {
-    return findTemplate(el, templates, false);
-  }
-
-  function pagerTemplateOf(el) {
-    return findTemplate(el, pagerTemplates, true);
-  }
-
-  function own(o, k) {
-    return o && typeof o === "object" && Object.prototype.hasOwnProperty.call(o, k) ? o[k] : undefined;
-  }
-
-  function isEntry(v) {
-    return !!v && typeof v === "object" && !Array.isArray(v) && !!v.data && typeof v.data === "object";
-  }
-
-  function remove(node) {
-    if (node.parentNode) node.parentNode.removeChild(node);
+    if (found) templateSets.set(el, found);
+    return templateSets.get(el) || {};
   }
 
   // "title", "author.name", or "." (the scope itself, inside data-each). An entry exposes its built-ins and its data fields.
@@ -279,16 +297,7 @@
     });
   }
 
-  function bindHref(node, scope) {
-    var href = safeHref(node.getAttribute("data-href").replace(PLACEHOLDER_RE, function (_, name) {
-      var v = lookup(scope, name).value;
-      if (name === "slug" && !present(v)) v = lookup(scope, "id").value;
-      return encodeURIComponent(textOf(v));
-    }));
-    if (href) node.setAttribute("href", href);
-  }
-
-  // env: { locale, page: function (node, scope) } — page handles data-page inside a pager template.
+  // env: { locale, page: function (node, scope) } — page handles data-page inside pager / prevnext templates.
   function fill(root, scope, env) {
     // Both lists are taken before data-each inserts its copies, which were already filled with their own scope.
     var nodes = root.querySelectorAll("[data-field],[data-if],[data-class],[data-href],[data-page]");
@@ -298,9 +307,7 @@
       var list = lookup(scope, tpl.getAttribute("data-each")).value;
       if (Array.isArray(list)) {
         list.forEach(function (item) {
-          var copy = tpl.content.cloneNode(true);
-          fill(copy, item, env);
-          tpl.parentNode.insertBefore(copy, tpl);
+          tpl.parentNode.insertBefore(stamp(tpl, item, env), tpl);
         });
       }
       remove(tpl);
@@ -318,9 +325,41 @@
       }
       if (node.hasAttribute("data-field")) bindField(node, scope, env.locale);
       if (node.hasAttribute("data-class")) bindClass(node, scope);
-      if (node.hasAttribute("data-href")) bindHref(node, scope);
+      if (node.hasAttribute("data-href")) {
+        var href = hrefFrom(node.getAttribute("data-href"), scope);
+        if (href) node.setAttribute("href", href);
+      }
       if (node.hasAttribute("data-page") && env.page) env.page(node, scope);
     }
+  }
+
+  function stamp(tpl, scope, env) {
+    var copy = tpl.content.cloneNode(true);
+    fill(copy, scope, env);
+    return copy;
+  }
+
+  // A filled template placed at the end of el inside div.<cls>, replacing an earlier one.
+  function renderBlock(el, tpl, cls, scope, env) {
+    remove(childWithClass(el, cls));
+    var wrap = document.createElement("div");
+    wrap.className = cls;
+    wrap.appendChild(stamp(tpl, scope, env));
+    el.appendChild(wrap);
+    return wrap;
+  }
+
+  function childWithClass(el, cls) {
+    for (var c = el.firstElementChild; c; c = c.nextElementSibling) {
+      if (c.classList.contains(cls)) return c;
+    }
+    return null;
+  }
+
+  // Replaces el's content with a filled template (empty / error states).
+  function renderState(el, tpl) {
+    el.textContent = "";
+    el.appendChild(stamp(tpl, {}, { locale: localeOf(el) }));
   }
 
   // Reference fields the template reads through ("author.name", or data-each="related"): fetched with ?expand=.
@@ -344,33 +383,63 @@
     return out;
   }
 
-  function itemsContainer(el) {
-    for (var c = el.firstElementChild; c; c = c.nextElementSibling) {
-      if (c.classList.contains("fcms-list") || c.classList.contains("fcms-items")) return c;
+  // ---- built-in markup ---------------------------------------------------------------------
+
+  function renderField(name, item, locale) {
+    if (DATE_FIELDS[name] === 1) {
+      var raw = item[name];
+      var d = typeof raw === "string" ? new Date(raw) : null;
+      if (!d || isNaN(d.getTime())) return null;
+      var time = document.createElement("time");
+      time.className = "fcms-date";
+      time.setAttribute("datetime", raw);
+      time.textContent = formatDate(d, locale);
+      return time;
+    }
+    var cls = className(name);
+    if (!cls) return null;
+    var value = item.data ? item.data[name] : undefined;
+    if (typeof value === "string" || typeof value === "number") {
+      var text = String(value);
+      if (!text) return null;
+      var span = document.createElement("span");
+      span.className = name === "title" ? "fcms-title" : "fcms-field fcms-field-" + cls;
+      span.textContent = text;
+      return span;
+    }
+    if (isMedia(value)) {
+      var img = document.createElement("img");
+      img.className = "fcms-image";
+      img.setAttribute("src", value.url);
+      img.setAttribute("alt", typeof value.alt === "string" ? value.alt : "");
+      img.setAttribute("loading", "lazy");
+      return img;
     }
     return null;
   }
 
+  function fieldList(el, fallback) {
+    var raw = el.getAttribute("data-fields");
+    var list = raw ? raw.split(",") : fallback;
+    return list.map(function (s) { return s.trim(); }).filter(Boolean);
+  }
+
+  // ---- lists -------------------------------------------------------------------------------
+
   function appendItems(el, ul, items) {
-    var tpl = templateOf(el);
+    var tpl = templatesOf(el).item;
+    var locale = localeOf(el);
     if (tpl) {
-      var loc = localeOf(el);
-      items.forEach(function (item) {
-        var copy = tpl.content.cloneNode(true);
-        fill(copy, item, { locale: loc });
-        ul.appendChild(copy);
-      });
+      items.forEach(function (item) { ul.appendChild(stamp(tpl, item, { locale: locale })); });
       return;
     }
-    var fields = (el.getAttribute("data-fields") || "publishedAt,title")
-      .split(",").map(function (s) { return s.trim(); }).filter(Boolean);
-    var locale = localeOf(el);
+    var fields = fieldList(el, ["publishedAt", "title"]);
     var template = el.getAttribute("data-href") || "";
     items.forEach(function (item) {
       var li = document.createElement("li");
       li.className = "fcms-item";
       var parent = li;
-      var href = buildHref(template, item);
+      var href = template ? hrefFrom(template, item) : "";
       if (href) {
         var a = document.createElement("a");
         a.className = "fcms-link";
@@ -386,8 +455,9 @@
     });
   }
 
+  // Template copies go into ul.fcms-items when the template is an <li>, else div.fcms-items; built-in rows into ul.fcms-list.
   function renderList(el, items) {
-    var tpl = templateOf(el);
+    var tpl = templatesOf(el).item;
     var first = tpl && tpl.content.firstElementChild;
     var ul = document.createElement(!tpl || (first && first.tagName === "LI") ? "ul" : "div");
     ul.className = tpl ? "fcms-items" : "fcms-list";
@@ -396,10 +466,34 @@
     el.appendChild(ul);
   }
 
+  function itemsContainer(el) {
+    return childWithClass(el, "fcms-items") || childWithClass(el, "fcms-list");
+  }
+
+  function pageNumber(el) {
+    var n = parseInt(new URLSearchParams(window.location.search).get(el.getAttribute("data-page-param") || "page") || "", 10);
+    return isNaN(n) || n < 1 ? 1 : n;
+  }
+
+  // 1 … 9 10 11 … 20 : first, last, and the current page with its neighbours.
+  function pageWindow(current, pages) {
+    var out = [];
+    for (var p = 1; p <= pages; p++) {
+      if (pages <= 7 || p === 1 || p === pages || Math.abs(p - current) <= 1) out.push(p);
+      else if (out[out.length - 1] !== 0) out.push(0);
+    }
+    return out;
+  }
+
   function pageHref(el, page) {
     var params = new URLSearchParams(window.location.search);
     params.set(el.getAttribute("data-page-param") || "page", String(page));
     return "?" + params.toString();
+  }
+
+  function disableLink(node) {
+    node.removeAttribute("href");
+    node.setAttribute("aria-disabled", "true");
   }
 
   function renderPager(el, current, pages) {
@@ -435,49 +529,22 @@
     el.appendChild(nav);
   }
 
-  // <template data-pager>: filled with the pager's numbers and inserted after the items as div.fcms-pager-custom.
-  function renderCustomPager(el, tpl, scope, page) {
-    var old = customPager(el);
-    if (old) remove(old);
-    var copy = tpl.content.cloneNode(true);
-    fill(copy, scope, { locale: localeOf(el), page: page });
-    var mores = copy.querySelectorAll("[data-more]");
-    for (var i = 0; i < mores.length; i++) {
-      mores[i].addEventListener("click", function (e) {
-        e.preventDefault();
-        more(el);
-      });
-    }
-    var wrap = document.createElement("div");
-    wrap.className = "fcms-pager-custom";
-    wrap.appendChild(copy);
-    el.appendChild(wrap);
-  }
-
-  function customPager(el) {
-    for (var c = el.firstElementChild; c; c = c.nextElementSibling) {
-      if (c.classList.contains("fcms-pager-custom")) return c;
-    }
-    return null;
-  }
-
   // data-page="prev|next|first|last", or a bare data-page inside data-each="pages" for that page.
   function renderPagesTemplate(el, tpl, current, pages, total) {
     var scope = {
       current: current, totalPages: pages, total: total, hasPrev: current > 1, hasNext: current < pages,
       pages: pageWindow(current, pages).map(function (p) { return p === 0 ? { gap: true } : { number: p, current: p === current, gap: false }; }),
     };
-    renderCustomPager(el, tpl, scope, function (node, s) {
-      var which = node.getAttribute("data-page");
-      var target = which === "prev" ? current - 1 : which === "next" ? current + 1 : which === "first" ? 1 : which === "last" ? pages
-        : which === "" && typeof s.number === "number" ? s.number : 0;
-      if (target < 1 || target > pages || (target === current && (which === "prev" || which === "next"))) {
-        node.removeAttribute("href");
-        node.setAttribute("aria-disabled", "true");
-        return;
-      }
-      node.setAttribute("href", pageHref(el, target));
-      if (target === current && which === "") node.setAttribute("aria-current", "page");
+    renderBlock(el, tpl, "fcms-pager-custom", scope, {
+      locale: localeOf(el),
+      page: function (node, s) {
+        var which = node.getAttribute("data-page");
+        var target = which === "prev" ? current - 1 : which === "next" ? current + 1 : which === "first" ? 1 : which === "last" ? pages
+          : which === "" && typeof s.number === "number" ? s.number : 0;
+        if (target < 1 || target > pages) return disableLink(node);
+        node.setAttribute("href", pageHref(el, target));
+        if (target === current && which === "") node.setAttribute("aria-current", "page");
+      },
     });
   }
 
@@ -486,21 +553,22 @@
 
   function renderMoreButton(el) {
     var state = moreState.get(el);
-    var tpl = pagerTemplateOf(el);
+    var done = !state || state.offset >= state.total;
+    var tpl = templatesOf(el).pager;
     if (tpl) {
-      if (!state || state.offset >= state.total) {
-        var stale = customPager(el);
-        if (stale) remove(stale);
-        return;
+      if (done) return remove(childWithClass(el, "fcms-pager-custom"));
+      var wrap = renderBlock(el, tpl, "fcms-pager-custom", { loaded: state.offset, total: state.total, remaining: state.total - state.offset }, { locale: localeOf(el) });
+      var buttons = wrap.querySelectorAll("[data-more]");
+      for (var i = 0; i < buttons.length; i++) {
+        buttons[i].addEventListener("click", function (e) {
+          e.preventDefault();
+          more(el);
+        });
       }
-      renderCustomPager(el, tpl, { loaded: state.offset, total: state.total, remaining: state.total - state.offset }, null);
       return;
     }
     var old = el.querySelector("button.fcms-more");
-    if (!state || state.offset >= state.total) {
-      if (old) old.parentNode.removeChild(old);
-      return;
-    }
+    if (done) return remove(old);
     if (old) return;
     var btn = document.createElement("button");
     btn.className = "fcms-more";
@@ -510,16 +578,19 @@
     el.appendChild(btn);
   }
 
+  function moreButtons(el) {
+    var wrap = childWithClass(el, "fcms-pager-custom");
+    return Array.prototype.slice.call(wrap ? wrap.querySelectorAll("[data-more]") : el.querySelectorAll("button.fcms-more"));
+  }
+
   function more(el) {
     var state = moreState.get(el);
     if (!state || state.loading || state.offset >= state.total) return Promise.resolve();
     state.loading = true;
     moreButtons(el).forEach(function (b) { b.setAttribute("disabled", ""); });
     return Promise.resolve()
-      .then(function () { return fetch(buildUrl(state.collection, state.limit, state.offset, state.filter, state.expand), { credentials: "omit" }); })
-      .then(function (res) {
-        if (!res.ok) throw new Error("HTTP " + res.status + " for " + state.collection);
-        return res.json();
+      .then(function () {
+        return getJson(listUrl(state.collection, { limit: state.limit, sort: state.sort, offset: state.offset, filter: state.filter, expand: state.expand }), state.collection);
       })
       .then(function (body) {
         if (moreState.get(el) !== state) return;
@@ -538,35 +609,39 @@
       });
   }
 
-  function moreButtons(el) {
-    var wrap = customPager(el);
-    var found = wrap ? wrap.querySelectorAll("[data-more]") : el.querySelectorAll("button.fcms-more");
-    return Array.prototype.slice.call(found);
+  // ---- entries -----------------------------------------------------------------------------
+
+  function entryKey(el) {
+    var fixed = el.getAttribute("data-slug");
+    if (fixed) return fixed;
+    return new URLSearchParams(window.location.search).get(el.getAttribute("data-param") || "slug") || "";
   }
 
-  function renderEmpty(el) {
-    el.textContent = "";
-    var message = el.getAttribute("data-empty");
-    if (!message) return;
-    var p = document.createElement("p");
-    p.className = "fcms-empty";
-    p.textContent = message;
-    el.appendChild(p);
+  // A link to another entry: data-href on the element, else this page with ?slug= (or data-param) swapped.
+  function entryLink(el, e) {
+    var template = el.getAttribute("data-href");
+    if (template) return hrefFrom(template, e);
+    var key = e.slug || e.id;
+    if (!key) return "";
+    var params = new URLSearchParams(window.location.search);
+    params.delete("preview");
+    params.set(el.getAttribute("data-param") || "slug", key);
+    return "?" + params.toString();
   }
 
-  function fieldList(el, fallback) {
-    var raw = el.getAttribute("data-fields");
-    var list = raw ? raw.split(",") : fallback;
-    return list.map(function (s) { return s.trim(); }).filter(Boolean);
+  function setDocumentTitle(el, item) {
+    var docTitle = item.data ? item.data.title : undefined;
+    if (el.hasAttribute("data-document-title") && typeof docTitle === "string" && docTitle) {
+      document.title = document.title ? docTitle + " | " + document.title : docTitle;
+    }
   }
 
   // Detail view. The only HTML inserted as markup is item.html[field]: the CMS renders it from Markdown with raw HTML escaped and unsafe URLs removed.
   function renderEntry(el, item) {
     var locale = localeOf(el);
-    var tpl = templateOf(el);
+    var tpl = templatesOf(el).item;
     if (tpl) {
-      var copy = tpl.content.cloneNode(true);
-      fill(copy, item, { locale: locale });
+      var copy = stamp(tpl, item, { locale: locale });
       el.textContent = "";
       el.appendChild(copy);
       setDocumentTitle(el, item);
@@ -600,76 +675,101 @@
     setDocumentTitle(el, item);
   }
 
-  function setDocumentTitle(el, item) {
-    var docTitle = item.data ? item.data.title : undefined;
-    if (el.hasAttribute("data-document-title") && typeof docTitle === "string" && docTitle) {
-      document.title = document.title ? docTitle + " | " + document.title : docTitle;
-    }
+  function firstItem(url, what) {
+    return getJson(url, what)
+      .then(function (body) { return body && Array.isArray(body.items) && body.items[0] ? body.items[0] : null; })
+      .catch(function (err) {
+        warn(err);
+        return null;
+      });
   }
 
-  function entryKey(el) {
-    var fixed = el.getAttribute("data-slug");
-    if (fixed) return fixed;
-    var params = new URLSearchParams(window.location.search);
-    return params.get(el.getAttribute("data-param") || "slug") || "";
+  // prev = the entry published just before this one (older), next = just after (newer). Published entries only.
+  function renderPrevNext(el, collection, item, token) {
+    var tpl = templatesOf(el).prevnext;
+    if (!tpl && !el.hasAttribute("data-prevnext")) return null;
+    if (item.status !== "published" || typeof item.publishedAt !== "string") return null;
+    var filter = el.getAttribute("data-filter") || "";
+    return Promise.all([
+      firstItem(neighborUrl(collection, "lt", item.publishedAt, filter), collection),
+      firstItem(neighborUrl(collection, "gt", item.publishedAt, filter), collection),
+    ]).then(function (found) {
+      if (latest.get(el) !== token) return;
+      var prev = found[0];
+      var next = found[1];
+      if (!prev && !next) return;
+      if (tpl) {
+        renderBlock(el, tpl, "fcms-prevnext-custom", { prev: prev, next: next }, {
+          locale: localeOf(el),
+          page: function (node) {
+            var which = node.getAttribute("data-page");
+            var target = which === "prev" ? prev : which === "next" ? next : null;
+            var href = target ? entryLink(el, target) : "";
+            if (href) node.setAttribute("href", href);
+            else disableLink(node);
+          },
+        });
+        return;
+      }
+      var ja = isJapanese(el);
+      var nav = document.createElement("nav");
+      nav.className = "fcms-prevnext";
+      nav.setAttribute("aria-label", ja ? "前後の記事" : "More entries");
+      [[prev, "fcms-prev", "prev", "‹ ", ""], [next, "fcms-next", "next", "", " ›"]].forEach(function (p) {
+        var href = p[0] ? entryLink(el, p[0]) : "";
+        if (!href) return;
+        var a = document.createElement("a");
+        a.className = p[1];
+        a.setAttribute("href", href);
+        a.setAttribute("rel", p[2]);
+        a.textContent = p[3] + (textOf(lookup(p[0], "title").value) || p[0].slug || p[0].id) + p[4];
+        nav.appendChild(a);
+      });
+      if (nav.firstChild) el.appendChild(nav);
+    });
   }
 
-  function buildEntryUrl(collection, key, expand) {
-    var url = new URL(base + "/api/" + encodeURIComponent(collection) + "/" + encodeURIComponent(key));
-    var preview = new URLSearchParams(window.location.search).get("preview");
-    if (preview) url.searchParams.set("preview", preview);
-    applyExpand(url, expand);
-    return url.toString();
+  // ---- states ------------------------------------------------------------------------------
+
+  function renderEmpty(el) {
+    var tpl = templatesOf(el).empty;
+    if (tpl) return renderState(el, tpl);
+    el.textContent = "";
+    var message = el.getAttribute("data-empty");
+    if (!message) return;
+    var p = document.createElement("p");
+    p.className = "fcms-empty";
+    p.textContent = message;
+    el.appendChild(p);
   }
+
+  // Without <template data-error> the element is left as it was (any loading text stays).
+  function renderError(el, token, err) {
+    warn(err);
+    var tpl = templatesOf(el).error;
+    if (tpl && latest.get(el) === token) renderState(el, tpl);
+  }
+
+  // ---- driver ------------------------------------------------------------------------------
 
   var latest = new WeakMap();
-
-  function renderEntryElement(el) {
-    var token = {};
-    latest.set(el, token);
-    var collection = el.getAttribute("data-femtocms-entry");
-    if (!collection) return Promise.resolve();
-    var key = entryKey(el);
-    var expand = expandsOf(templateOf(el));
-    if (!key) {
-      renderEmpty(el);
-      return Promise.resolve();
-    }
-    return Promise.resolve()
-      .then(function () { return fetch(buildEntryUrl(collection, key, expand), { credentials: "omit" }); })
-      .then(function (res) {
-        if (res.status === 404) return null;
-        if (!res.ok) throw new Error("HTTP " + res.status + " for " + collection + "/" + key);
-        return res.json();
-      })
-      .then(function (body) {
-        if (latest.get(el) !== token) return;
-        if (body === null) return renderEmpty(el);
-        if (!body || typeof body !== "object" || !body.data) throw new Error("unexpected response for " + collection + "/" + key);
-        renderEntry(el, body);
-      })
-      .catch(warn);
-  }
 
   function renderElement(el) {
     var token = {};
     latest.set(el, token);
     var collection = el.getAttribute("data-femtocms");
     if (!collection) return Promise.resolve();
+    var tpls = templatesOf(el); // read before rendering replaces the children
     moreState.delete(el);
     var limit = clampLimit(el.getAttribute("data-limit"));
     var pager = el.getAttribute("data-pager");
-    var filter = el.getAttribute("data-filter") || "";
     var page = pager === "pages" ? pageNumber(el) : 1;
-    var offset = pager === "pages" || pager === "more" ? (page - 1) * limit : null;
-    var expand = expandsOf(templateOf(el));
-    var pagerTpl = pagerTemplateOf(el); // read before rendering replaces the children
+    var q = {
+      limit: limit, sort: sortOf(el), filter: el.getAttribute("data-filter") || "", expand: expandsOf(tpls.item),
+      offset: pager === "pages" || pager === "more" ? (page - 1) * limit : null,
+    };
     return Promise.resolve()
-      .then(function () { return fetch(buildUrl(collection, limit, offset, filter, expand), { credentials: "omit" }); })
-      .then(function (res) {
-        if (!res.ok) throw new Error("HTTP " + res.status + " for " + collection);
-        return res.json();
-      })
+      .then(function () { return getJson(listUrl(collection, q), collection); })
       .then(function (body) {
         if (!body || !Array.isArray(body.items)) throw new Error("unexpected response for " + collection);
         // A newer render of the same element supersedes this one.
@@ -679,14 +779,38 @@
         var total = typeof body.total === "number" ? body.total : body.items.length;
         if (pager === "pages") {
           var pages = Math.ceil(total / limit);
-          if (pages > 1 && pagerTpl) renderPagesTemplate(el, pagerTpl, page, pages, total);
+          if (pages > 1 && tpls.pager) renderPagesTemplate(el, tpls.pager, page, pages, total);
           else if (pages > 1) renderPager(el, page, pages);
         } else if (pager === "more" && body.items.length) {
-          moreState.set(el, { collection: collection, limit: limit, filter: filter, expand: expand, offset: body.items.length, total: total, loading: false });
+          moreState.set(el, {
+            collection: collection, limit: limit, sort: q.sort, filter: q.filter, expand: q.expand,
+            offset: body.items.length, total: total, loading: false,
+          });
           renderMoreButton(el);
         }
       })
-      .catch(warn);
+      .catch(function (err) { renderError(el, token, err); });
+  }
+
+  function renderEntryElement(el) {
+    var token = {};
+    latest.set(el, token);
+    var collection = el.getAttribute("data-femtocms-entry");
+    if (!collection) return Promise.resolve();
+    var tpls = templatesOf(el);
+    var key = entryKey(el);
+    var expand = expandsOf(tpls.item);
+    var url = key ? entryUrl(collection, key, expand) : singleUrl(collection, expand);
+    return Promise.resolve()
+      .then(function () { return getJson(url, key ? collection + "/" + key : collection, true); })
+      .then(function (body) {
+        if (latest.get(el) !== token) return;
+        if (body === null || (!key && body && Array.isArray(body.items))) return renderEmpty(el);
+        if (!body || typeof body !== "object" || !body.data) throw new Error("unexpected response for " + collection + (key ? "/" + key : ""));
+        renderEntry(el, body);
+        return renderPrevNext(el, collection, body, token);
+      })
+      .catch(function (err) { renderError(el, token, err); });
   }
 
   function refresh() {

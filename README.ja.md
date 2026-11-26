@@ -185,9 +185,10 @@ MCP のエンドポイントは `https://<サイト>/mcp`（Streamable HTTP、�
 | 属性 | 内容 |
 |---|---|
 | `data-femtocms` | コレクション名（必須）。 |
-| `data-limit` | 件数。1〜100（既定 5）。公開日の新しい順。 |
+| `data-limit` | 件数。1〜100（既定 5）。 |
+| `data-sort` | 並び順。API の `sort` と同じ書き方で、フィールド名をカンマ区切り、`-` を付けると降順（例: `order`、`-price,title`）。既定は `-publishedAt`（公開日の新しい順）。 |
 | `data-fields` | 表示するフィールドをカンマ区切りで、表示順に指定。既定は `publishedAt,title`。`publishedAt`・`createdAt`・`updatedAt` は日付として表示します。データのフィールドは、値が文字列か数値なら（text・textarea・number・datetime・単一の select、Markdown の原文）テキストとして、image なら `<img>` として表示し、それ以外の値（list・複数選択・参照・JSON）は表示しません。 |
-| `data-href` | リンク先の型。`/news.html?slug={slug}` や `/news?id={id}` のように書きます。指定しなければリンクしません。femtocms は記事ページ自体は配信しません。自分のページに[詳細の埋め込み](#記事ページ)を置いてください。 |
+| `data-href` | リンク先の型。`/news.html?slug={slug}` や `/news?id={id}` のように書きます。`{}` の中にはどのフィールド名も書け、値は URL エンコードされます。指定しなければリンクしません。femtocms は記事ページ自体は配信しません。自分のページに[詳細の埋め込み](#記事ページ)を置いてください。 |
 | `data-locale` | 日付のロケール（既定はページの `<html lang>`）。 |
 | `data-empty` | エントリがないときに表示するメッセージ。 |
 | `data-filter` | 条件に合うエントリだけを出します。例: `category=menu`、`category=event&price[gte]=1000`（演算子は API の `filter` と同じ `eq ne lt lte gt gte contains in`）。 |
@@ -218,8 +219,11 @@ MCP のエンドポイントは `https://<サイト>/mcp`（Streamable HTTP、�
 | `data-document-title` | 付けると、ページの `<title>` を「記事タイトル \| 元のタイトル」にします。 |
 | `data-locale` | 日付のロケール。 |
 | `data-empty` | 記事がない・下書き・slug の指定がないときに表示するメッセージ。 |
+| `data-prevnext` | 付けると、記事の下に、公開日が1つ前（古い）の記事 `a.fcms-prev` と1つ後（新しい）の記事 `a.fcms-next` へのリンクを `<nav class="fcms-prevnext">` で出します。 |
+| `data-href` | そのリンク先の型（例: `/news/{slug}`）。既定はこのページの `?slug=` を差し替えた URL。 |
+| `data-filter` | 前後の記事を探す範囲を絞ります（例: `category=menu` で同じカテゴリの中だけ）。 |
 
-下書きは表示されません。下書きを実際のページのデザインで確認したいときは、`femtocms preview`（MCP なら `get_preview_url`）で得たトークンをページの URL に付けます: `news.html?slug=<slug>&preview=<トークン>`。Markdown の HTML は CMS が生成したもので、生の HTML はエスケープされ、危険なリンクは取り除かれています。スクリプトが HTML として差し込むのはこれだけです。本文は JavaScript で描画するので、サーバで描画するページに比べると検索エンジンには拾われにくいことがあります。
+slug を指定しないとき、`single` のコレクションならその1件を表示します。会社概要などは `<div data-femtocms-entry="about"></div>` だけで出せます。下書きは表示されません。下書きを実際のページのデザインで確認したいときは、`femtocms preview`（MCP なら `get_preview_url`）で得たトークンをページの URL に付けます: `news.html?slug=<slug>&preview=<トークン>`。Markdown の HTML は CMS が生成したもので、生の HTML はエスケープされ、危険なリンクは取り除かれています。スクリプトが HTML として差し込むのはこれだけです。本文は JavaScript で描画するので、サーバで描画するページに比べると検索エンジンには拾われにくいことがあります。
 
 ### テンプレートで見た目を自分で決める
 
@@ -285,6 +289,35 @@ MCP のエンドポイントは `https://<サイト>/mcp`（Streamable HTTP、�
 | `more` のとき | `loaded`（表示済みの件数）・`total`・`remaining`（残りの件数） |
 
 `data-page="prev"`・`"next"`・`"first"`・`"last"`、`data-each="pages"` の中の値なしの `data-page` には、リンク先（今の URL のほかのパラメータを残したもの）が入ります。前後のページがないときは `href` を外して `aria-disabled="true"` を付けるので、CSS で薄くしたり隠したりできます。今のページへのリンクには `aria-current="page"` が付きます。`data-more` を付けた要素を押すと次の分を読み込み（リンクでもページは移動しません）、読み込み中は `disabled` が付き、全部読み込むとページ送りの部分ごと消えます。1ページに収まるときは何も出しません。
+
+#### 前後の記事のテンプレート
+
+`<template data-prevnext>` を置くと、標準の前後リンクのかわりにそれを使います（テンプレートがあれば `data-prevnext` 属性は省略できます）。中では `prev` が古いほう、`next` が新しいほうの記事で、`data-field="prev.title"` や `data-if="next"` のように書けます。`data-page="prev"`・`"next"` を付けた要素にはリンク先が入り、該当する記事がなければ `href` を外して `aria-disabled="true"` を付けます。記事の下に `<div class="fcms-prevnext-custom">` で入ります。前後を探すのは公開済みの記事を表示しているときだけです。
+
+```html
+<div data-femtocms-entry="news">
+  <template> …記事… </template>
+  <template data-prevnext>
+    <nav>
+      <a data-if="prev" data-page="prev">← <span data-field="prev.title"></span></a>
+      <a data-if="next" data-page="next"><span data-field="next.title"></span> →</a>
+    </nav>
+  </template>
+</div>
+```
+
+#### 読み込み中・空・エラーの表示
+
+要素の中にテンプレート以外のもの（たとえば `<p>読み込み中…</p>`）を書いておくと、中身が届くまでそれが表示されます。`<template data-empty>` は、一覧が0件のときや記事が見つからないときに `data-empty` のメッセージのかわりに出ます。`<template data-error>` は読み込みに失敗したときに出ます（ないときは要素をそのままにして、コンソールにエラーを出します）。テンプレートの役割は属性で決まるので、並べる順番は自由です。
+
+```html
+<div data-femtocms="news">
+  <p>読み込み中…</p>
+  <template> …記事1件ぶん… </template>
+  <template data-empty><p>まだお知らせはありません。<a href="/">トップへ</a></p></template>
+  <template data-error><p>お知らせを読み込めませんでした。</p></template>
+</div>
+```
 
 ## キャッシュ
 

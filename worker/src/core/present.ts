@@ -21,8 +21,9 @@ interface MediaRow {
   alt: string; created_at: string;
 }
 
+// toWellFormed: encodeURIComponent throws on a lone surrogate, and a stored name must never turn a read into a 500.
 export const mediaUrl = (origin: string, m: { id: string; filename: string }): string =>
-  `${origin}/media/${m.id}/${encodeURIComponent(m.filename)}`;
+  `${origin}/media/${m.id}/${encodeURIComponent(m.filename.toWellFormed())}`;
 
 export function presentMedia(ctx: Ctx, m: MediaRecord): ApiMedia {
   return {

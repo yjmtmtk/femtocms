@@ -71,6 +71,10 @@ describe("uploadMedia", () => {
     expect((await uploadMedia(admin(), { bytes: fixtures.png, filename: "///" })).filename).toBe("file");
     expect((await uploadMedia(admin(), { bytes: fixtures.png, filename: ".." })).filename).toBe("file");
   });
+  it("ペアになっていないサロゲートは U+FFFD に置き換える（ペアの絵文字は残す）", async () => {
+    const m = await uploadMedia(admin(), { bytes: fixtures.png, filename: "\ud800x\udc00😀.png" });
+    expect(m.filename).toBe("\ufffdx\ufffd😀.png");
+  });
   it("書き込みで content_version が上がる", async () => {
     const before = await version();
     await uploadMedia(admin(), { bytes: fixtures.png, filename: "a.png" });

@@ -305,6 +305,16 @@ describe("メディア", () => {
     expect(errorOf(await call(client, "update_media", { id: "m_000000000000", alt: "x" })).code).toBe("not_found");
   });
 
+  it("ペアになっていないサロゲートのファイル名でも upload_media と list_media がエラーにならない", async () => {
+    const client = await connect(K);
+    const r = await call(client, "upload_media", { base64: btoa(String.fromCharCode(...fixtures.png)), filename: "\ud800.png" });
+    expect(r.isError).toBeUndefined();
+    expect(r.structuredContent.url).toMatch(/\/%EF%BF%BD\.png$/);
+    const list = await call(client, "list_media");
+    expect(list.isError).toBeUndefined();
+    expect(list.structuredContent.items[0].filename).toBe("\ufffd.png");
+  });
+
   it("url から取り込める（外部 fetch はモック）", async () => {
     const real = globalThis.fetch;
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) =>

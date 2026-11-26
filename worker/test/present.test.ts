@@ -169,6 +169,10 @@ describe("presentEntries", () => {
 });
 
 describe("presentMedia / mediaUrl", () => {
+  it("ペアになっていないサロゲートを含む名前でも throw せず、U+FFFD としてエンコードする", () => {
+    expect(mediaUrl("https://o", { id: "m_1", filename: "a\udc00b.png" })).toBe("https://o/media/m_1/a%EF%BF%BDb.png");
+    expect(mediaUrl("https://o", { id: "m_1", filename: "\ud800" })).toBe("https://o/media/m_1/%EF%BF%BD");
+  });
   it("URL とフィールド", () => {
     expect(mediaUrl("https://o", { id: "m_1", filename: "a b.png" })).toBe("https://o/media/m_1/a%20b.png");
     expect(presentMedia(admin(), { id: "m_1", filename: "a.png", mimeType: "image/png", size: 1, width: null, height: null, alt: "", createdAt: "t" }))

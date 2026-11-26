@@ -340,3 +340,37 @@ describe("export / import / reset", () => {
     expect((await json(res)).error.issues.map((i: { path: string }) => i.path)).toContain("entries[0].id");
   });
 });
+
+describe("ペアになっていないサロゲートを含むファイル名", () => {
+  it("base64 のアップロードは 201、一覧も配信も 500 にならず、URL は正しくエンコードされる", async () => {
+    const png = btoa(String.fromCharCode(...fixtures.png));
+    const res = await api("POST", "/api/media", { key: K, body: { base64: png, filename: "\ud800.png" } });
+    expect(res.status).toBe(201);
+    const m = await json(res);
+    expect(m.filename).toBe("\ufffd.png");
+    expect(m.url).toBe(`https://cms.test/media/${m.id}/%EF%BF%BD.png`);
+    const list = await api("GET", "/api/media", { key: K });
+    expect(list.status).toBe(200);
+    expect((await json(list)).items[0].id).toBe(m.id);
+    const file = await SELF.fetch(m.url);
+    expect(file.status).toBe(200);
+    expect(file.headers.get("content-disposition")).toBe("inline; filename*=UTF-8''%EF%BF%BD.png");
+  });
+
+  it("既に保存されている行（D1 が置き換えた文字を含む）も、一覧・配信・エントリの画像で 500 にならない", async () => {
+    await env.DB.prepare(
+      "INSERT INTO media (id, filename, mime_type, size, created_at) VALUES ('m_000000000bad', ?, 'image/png', 1, 'now')",
+    ).bind("a\udc00b.png").run();
+    await env.MEDIA.put("media/m_000000000bad", fixtures.png);
+    const url = /^https:\/\/cms\.test\/media\/m_000000000bad\/a(%EF%BF%BD)+b\.png$/;
+    const list = await api("GET", "/api/media", { key: K });
+    expect(list.status).toBe(200);
+    expect((await json(list)).items[0].url).toMatch(url);
+    const file = await SELF.fetch("https://cms.test/media/m_000000000bad/x");
+    expect(file.status).toBe(200);
+    await api("POST", "/api/collections", { key: K, body: { name: "pages", fields: [{ name: "hero", type: "image" }] } });
+    const e = await api("POST", "/api/pages", { key: K, body: { data: { hero: "m_000000000bad" } } });
+    expect(e.status).toBe(201);
+    expect((await json(e)).data.hero.url).toMatch(url);
+  });
+});

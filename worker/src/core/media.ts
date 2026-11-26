@@ -33,8 +33,9 @@ const toRecord = (r: MediaRow): MediaRecord => ({
 // Path separators and control characters (incl. C1 and Unicode line/paragraph separators) are dropped; Unicode names are kept.
 const UNSAFE_FILENAME_CHARS = /[\\\/\u0000-\u001f\u007f-\u009f\u2028\u2029]/g;
 
+// Lone surrogates (invalid UTF-16) become U+FFFD first: encodeURIComponent throws on them, and D1 would mangle them anyway.
 export function sanitizeFilename(name: string): string {
-  const cleaned = name.replace(UNSAFE_FILENAME_CHARS, "").trim();
+  const cleaned = name.toWellFormed().replace(UNSAFE_FILENAME_CHARS, "").trim();
   if (cleaned === "" || cleaned === "." || cleaned === "..") return "file";
   const chars = Array.from(cleaned);
   if (chars.length <= MAX_FILENAME_LENGTH) return cleaned;
@@ -228,7 +229,7 @@ export async function listMedia(
 const INLINE_SAFE = /^(image\/(?!svg\+xml$)[^/]+|application\/pdf|video\/[^/]+|audio\/[^/]+|text\/plain)$/;
 
 // RFC 5987 attr-char: encodeURIComponent leaves ' ( ) * unescaped, which are not allowed.
-const encodeRfc5987 = (s: string) => encodeURIComponent(s).replace(/['()*]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`);
+const encodeRfc5987 = (s: string) => encodeURIComponent(s.toWellFormed()).replace(/['()*]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`);
 
 const notFound = () =>
   Response.json({ error: { code: "not_found", message: "メディアが見つかりません" } }, { status: 404 });

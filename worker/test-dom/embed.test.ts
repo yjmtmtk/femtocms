@@ -892,6 +892,7 @@ const middle = entry({ id: "e_000000000002", slug: "middle", publishedAt: PUB, d
 function neighbors(opts: { older?: unknown; newer?: unknown; current?: unknown } = {}) {
   return mockRouter((u) => {
     if (u.pathname === "/api/news/middle") return opts.current ?? middle;
+    if (u.searchParams.get("filter[publishedAt]")) return { items: [opts.current ?? middle], total: 1 };
     if (u.searchParams.get("filter[publishedAt][lt]")) return { items: opts.older === null ? [] : [opts.older ?? older], total: 1 };
     if (u.searchParams.get("filter[publishedAt][gt]")) return { items: opts.newer === null ? [] : [opts.newer ?? newer], total: 1 };
     return new Response("?", { status: 500 });
@@ -909,10 +910,10 @@ it("前後の記事: data-prevnext で、公開日が1つ前（古い）と1つ�
   const n = urls.find((u) => u.searchParams.has("filter[publishedAt][gt]"))!;
   expect(o.pathname).toBe("/api/news");
   expect(o.searchParams.get("filter[publishedAt][lt]")).toBe(PUB);
-  expect(o.searchParams.get("sort")).toBe("-publishedAt");
+  expect(o.searchParams.get("sort")).toBe("-publishedAt,-createdAt");
   expect(o.searchParams.get("limit")).toBe("1");
   expect(n.searchParams.get("filter[publishedAt][gt]")).toBe(PUB);
-  expect(n.searchParams.get("sort")).toBe("publishedAt");
+  expect(n.searchParams.get("sort")).toBe("publishedAt,createdAt");
   const nav = q("[data-femtocms-entry] > nav.fcms-prevnext");
   expect(q("[data-femtocms-entry] > article.fcms-entry")).not.toBeNull();
   const prev = nav.querySelector("a.fcms-prev");
@@ -1114,4 +1115,80 @@ it("ページ送りテンプレート: ページ数を超えたページでは p
   await win.femtocms.refresh();
   expect(q(".prev").getAttribute("href")).toBe("?page=3");
   expect(q(".next").hasAttribute("href")).toBe(false);
+});
+
+
+it("安全: サーバーが expanded に挙げた参照先の記事は、その Markdown を HTML として入れる（data-each の中も）", async () => {
+  setPageUrl("https://lp.test/");
+  const forged = { data: { x: "a" }, html: { x: "<img src=x onerror=alert(1)>" } };
+  document.body.innerHTML = `<div data-femtocms="news"><template>
+    <div class="c"><div class="a" data-field="author.body"></div><span class="m" data-field="meta.x"></span>
+    <template data-each="related"><div class="r" data-field="body"></div></template></div>
+  </template></div>`;
+  mockItems([entry({
+    expanded: ["author", "related"],
+    data: {
+      title: "A", meta: forged,
+      author: { id: "e_000000000009", data: { body: "**x**" }, html: { body: "<p><strong>x</strong></p>" } },
+      related: [{ id: "e_000000000008", data: { body: "**y**" }, html: { body: "<p><strong>y</strong></p>" } }],
+    },
+  })]);
+  load();
+  await win.femtocms.refresh();
+  expect(q(".a").innerHTML).toBe("<p><strong>x</strong></p>");
+  expect(q(".r").innerHTML).toBe("<p><strong>y</strong></p>");
+  expect(q(".m").textContent).toBe("a");
+  expect(document.querySelectorAll("img").length).toBe(0);
+});
+
+it("前後の記事: 公開日時が同じ記事どうしも、一覧と同じ並び（作成日時の新しい順 → id）でつながる", async () => {
+  const at = PUB;
+  const mk = (id: string, slug: string) => entry({ id, slug, publishedAt: at, data: { title: slug } });
+  const group = [mk("e_00000000000a", "g1"), mk("e_00000000000b", "g2"), mk("e_00000000000c", "g3")]; // list order
+  const route = (current: unknown) => mockRouter((u) => {
+    if (u.pathname.startsWith("/api/news/")) return current;
+    if (u.searchParams.get("filter[publishedAt]") === at) return { items: group, total: 3 };
+    if (u.searchParams.get("filter[publishedAt][lt]")) return { items: [older], total: 1 };
+    if (u.searchParams.get("filter[publishedAt][gt]")) return { items: [newer], total: 1 };
+    return new Response("?", { status: 500 });
+  });
+  document.body.innerHTML = `<div data-femtocms-entry="news" data-prevnext></div>`;
+
+  setPageUrl("https://lp.test/news.html?slug=g2");
+  route(group[1]);
+  load();
+  await win.femtocms.refresh();
+  expect(q("a.fcms-prev").getAttribute("href")).toBe("?slug=g3");
+  expect(q("a.fcms-next").getAttribute("href")).toBe("?slug=g1");
+
+  setPageUrl("https://lp.test/news.html?slug=g1");
+  route(group[0]);
+  await win.femtocms.refresh();
+  expect(q("a.fcms-prev").getAttribute("href")).toBe("?slug=g2");
+  expect(q("a.fcms-next").getAttribute("href")).toBe("?slug=newer");
+
+  setPageUrl("https://lp.test/news.html?slug=g3");
+  const fetchMock = route(group[2]);
+  await win.femtocms.refresh();
+  expect(q("a.fcms-prev").getAttribute("href")).toBe("?slug=older");
+  expect(q("a.fcms-next").getAttribute("href")).toBe("?slug=g2");
+  const grp = fetchMock.mock.calls.map((c) => new URL(String((c as unknown[])[0]))).find((u) => u.searchParams.get("filter[publishedAt]") === at)!;
+  expect(grp.searchParams.get("limit")).toBe("100");
+  expect(grp.searchParams.has("sort")).toBe(false);
+});
+
+
+it("圧縮版（デプロイされる embed.js）でも同じように描画する", async () => {
+  // @ts-expect-error -- plain .mjs build helper without type declarations
+  const { minifyEmbed } = await import("../../scripts/minify-embed.mjs");
+  const min = minifyEmbed(script) as string;
+  setPageUrl("https://lp.test/list.html?page=2");
+  document.body.innerHTML = `<div data-femtocms="news" data-limit="2" data-pager="pages">
+    <template><p class="t" data-field="title" data-class="status"></p></template>${PAGES_TPL}</div>`;
+  mockPaged(5);
+  new Function(min)();
+  await win.femtocms.refresh();
+  expect(qa("p.t").map((p) => p.textContent)).toEqual(["T2", "T3"]);
+  expect(q("p.t").classList.contains("status-published")).toBe(true);
+  expect(q(".next").getAttribute("href")).toBe("?page=3");
 });

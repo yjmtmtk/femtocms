@@ -202,6 +202,19 @@ describe("参照の展開", () => {
     expect(exp.data.author).toMatchObject({ id: author.id, data: { name: "山田" } });
     expect((exp.data.author as { html: Record<string, string> }).html.bio).toContain("<h1>hi</h1>");
   });
+  it("expand で参照先に置き換えたフィールド名を expanded に並べる（置き換えがなければ expanded は付けない）", async () => {
+    const [plain] = await presentEntries(pub(), post, [postRec({ author: author.id })], {});
+    expect(plain).not.toHaveProperty("expanded");
+    const [exp] = await presentEntries(pub(), post, [postRec({ author: author.id })], { expand: ["author", "nope"] });
+    expect(exp.expanded).toEqual(["author"]);
+    expect(exp.data.author).toMatchObject({ id: author.id });
+    expect(exp.data.author).not.toHaveProperty("expanded");
+    const [none] = await presentEntries(pub(), post, [postRec({})], { expand: ["author"] });
+    expect(none).not.toHaveProperty("expanded");
+    const multi: Collection = { ...post, fields: [{ name: "authors", type: "reference", collection: "authors", multiple: true }] };
+    const [m] = await presentEntries(pub(), multi, [postRec({ authors: [author.id] })], { expand: ["authors"] });
+    expect(m.expanded).toEqual(["authors"]);
+  });
   it("expand した参照先が下書きなら public には null、admin には出る", async () => {
     const draft = await createEntry(admin(), "authors", { data: { name: "下書き" } });
     const r = postRec({ author: draft.id });

@@ -3,12 +3,14 @@
 // `wrangler deploy --dry-run --outdir` bundles worker/src with worker/wrangler.jsonc, whose `rules` turn
 // *.client.js into Text modules. Wrangler emits those as extra files (`<hash>-embed.client.js`) imported
 // from index.js, but the generated site config deploys with `no_bundle`, so we inline them here as string
-// constants and delete the extra files. The self-check at the end fails the build if that did not work.
+// constants (minified with esbuild) and delete the extra files. The self-check at the end fails the build if
+// that did not work.
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { minifyEmbed } from "./minify-embed.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const outdir = join(root, "dist", "worker");
@@ -34,12 +36,12 @@ if (build.status !== 0 || !existsSync(entry)) {
   fail(`wrangler の dry-run が失敗しました（終了コード ${build.status}）`);
 }
 
-// import EMBED from "./<hash>-embed.client.js";  ->  const EMBED = "<file contents>";
+// import EMBED from "./<hash>-embed.client.js";  ->  const EMBED = "<minified file contents>";
 // The import is one line and JSON.stringify yields one line, so source-map line numbers stay valid.
 let code = readFileSync(entry, "utf8");
 const inlined = [];
 code = code.replace(/^import (\w+) from "\.\/([^"\n]+\.client\.js)";$/gm, (_m, name, file) => {
-  const source = readFileSync(join(outdir, file), "utf8");
+  const source = minifyEmbed(readFileSync(join(outdir, file), "utf8"));
   rmSync(join(outdir, file));
   inlined.push(source);
   return `const ${name} = ${JSON.stringify(source)};`;
@@ -47,10 +49,10 @@ code = code.replace(/^import (\w+) from "\.\/([^"\n]+\.client\.js)";$/gm, (_m, n
 writeFileSync(entry, code);
 
 // Self-check: the embed script is in the bundle as a string and nothing still imports a sibling file.
-const embedSource = readFileSync(join(root, "worker", "src", "public", "embed.client.js"), "utf8");
-if (!code.includes(JSON.stringify(embedSource))) fail("dist/worker/index.js に embed.client.js の中身が埋め込まれていません");
+const embedSource = minifyEmbed(readFileSync(join(root, "worker", "src", "public", "embed.client.js"), "utf8"));
+if (!code.includes(JSON.stringify(embedSource))) fail("dist/worker/index.js に embed.client.js（圧縮後）の中身が埋め込まれていません");
 if (/from\s+"\.\/[^"]*\.client\.js"/.test(code)) fail("dist/worker/index.js が .client.js を import したままです");
 const leftovers = readdirSync(outdir).filter((f) => f.endsWith(".client.js"));
 if (leftovers.length > 0) fail(`余分なモジュールが残っています: ${leftovers.join(", ")}`);
 
-console.log(`build-worker: dist/worker/index.js (${(code.length / 1024).toFixed(0)} KiB, ${inlined.length} text module(s) inlined)`);
+console.log(`build-worker: dist/worker/index.js (${(code.length / 1024).toFixed(0)} KiB, ${inlined.length} text module(s) inlined, embed.js ${(embedSource.length / 1024).toFixed(1)} KiB)`);

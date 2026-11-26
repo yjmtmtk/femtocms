@@ -618,9 +618,14 @@ describe("defaultRunner", () => {
 describe("built worker bundle", () => {
   const built = join(packageRoot(), "dist", "worker", "index.js");
   // dist/ is a build artifact (npm run build:worker); the build script also fails loudly on its own.
-  it.skipIf(!existsSync(built))("embed.client.js の中身が文字列として埋め込まれ、外部モジュールの import が残っていない", () => {
+  it.skipIf(!existsSync(built))("embed.client.js の中身が圧縮された文字列として埋め込まれ、外部モジュールの import が残っていない", async () => {
     const text = readFileSync(built, "utf8");
-    const embed = readFileSync(join(packageRoot(), "worker", "src", "public", "embed.client.js"), "utf8");
+    const source = readFileSync(join(packageRoot(), "worker", "src", "public", "embed.client.js"), "utf8");
+    // @ts-expect-error -- plain .mjs build helper without type declarations
+    const { minifyEmbed } = await import("../../scripts/minify-embed.mjs");
+    const embed = minifyEmbed(source) as string;
+    expect(embed.length).toBeLessThan(source.length);
+    expect(embed).not.toContain("// ---- basics");
     expect(text).toContain(JSON.stringify(embed));
     expect(text).not.toMatch(/from\s+"\.\/[^"]*\.client\.js"/);
   });

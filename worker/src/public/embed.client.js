@@ -179,13 +179,22 @@
     return url.toString();
   }
 
-  // The entry published just before ("lt") or just after ("gt") the given time.
+  // The entry published just before ("lt") or just after ("gt") the given time, nearest first in list order.
   function neighborUrl(collection, op, publishedAt, filter) {
     var url = collectionUrl(collection);
     url.searchParams.set("limit", "1");
-    url.searchParams.set("sort", op === "lt" ? "-publishedAt" : "publishedAt");
+    url.searchParams.set("sort", op === "lt" ? "-publishedAt,-createdAt" : "publishedAt,createdAt");
     applyFilter(url, filter);
     url.searchParams.set("filter[publishedAt][" + op + "]", publishedAt);
+    return url.toString();
+  }
+
+  // Entries published at exactly the same time, in the list's default order (newest created first, then id).
+  function sameTimeUrl(collection, publishedAt, filter) {
+    var url = collectionUrl(collection);
+    url.searchParams.set("limit", "100");
+    applyFilter(url, filter);
+    url.searchParams.set("filter[publishedAt]", publishedAt);
     return url.toString();
   }
 
@@ -203,12 +212,18 @@
 
   var templateSets = new WeakMap();
 
-  // Entries exactly as the API returned them (list items, the entry, its neighbours). Only their html is markup:
-  // an object of the same shape found inside data (a json or list field, an expanded reference) stays text.
+  // Entries exactly as the API returned them: list items, the entry, its neighbours, and the referenced entries the
+  // server lists in their `expanded` (outside data, so stored values cannot fake it). Only their html is markup: an
+  // object of the same shape anywhere else inside data (a json or list value) stays text.
   var trusted = new WeakSet();
 
   function trust(o) {
-    if (o && typeof o === "object") trusted.add(o);
+    if (!isEntry(o)) return o;
+    trusted.add(o);
+    (Array.isArray(o.expanded) ? o.expanded : []).forEach(function (name) {
+      var v = typeof name === "string" ? own(o.data, name) : undefined;
+      (Array.isArray(v) ? v : [v]).forEach(function (x) { if (isEntry(x)) trusted.add(x); });
+    });
     return o;
   }
 
@@ -707,10 +722,22 @@
     return Promise.all([
       firstItem(neighborUrl(collection, "lt", item.publishedAt, filter), collection),
       firstItem(neighborUrl(collection, "gt", item.publishedAt, filter), collection),
+      getJson(sameTimeUrl(collection, item.publishedAt, filter), collection).catch(function (err) {
+        warn(err);
+        return null;
+      }),
     ]).then(function (found) {
       if (latest.get(el) !== token) return;
       var prev = found[0];
       var next = found[1];
+      // Entries sharing this publish time sit between the two in list order: step through them first.
+      var group = found[2] && Array.isArray(found[2].items) ? found[2].items : [];
+      var at = -1;
+      for (var i = 0; i < group.length; i++) if (group[i] && group[i].id === item.id) at = i;
+      if (at >= 0) {
+        if (at + 1 < group.length) prev = trust(group[at + 1]);
+        if (at > 0) next = trust(group[at - 1]);
+      }
       if (!prev && !next) return;
       if (tpl) {
         renderBlock(el, tpl, "fcms-prevnext-custom", { prev: prev, next: next }, {

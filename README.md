@@ -154,7 +154,7 @@ Base: `https://<your-site>/api`, JSON in and out. The machine-readable spec, gen
 - Published entries of public collections need no key.
 - Collections: `GET/POST /api/collections`, `GET/PATCH/DELETE /api/collections/:name`.
 - Entries: `GET/POST /api/:collection`, `GET/PATCH/DELETE /api/:collection/:idOrSlug`, `POST /api/:collection/:id/publish`, `POST /api/:collection/:id/unpublish`, `POST /api/:collection/:id/preview`. A `single` collection uses `GET/PUT /api/:collection`.
-- List parameters: `limit` (default 10, max 100), `offset`, `sort` (`-publishedAt`; the default is newest published first), `filter[field]=value` or `filter[field][gte]=1000` (operators `eq ne lt lte gt gte contains in`), `fields`, `expand` (one level), `status` (`draft`, `published`, `all`; admin only, default `published`). The response is `{ items, total, limit, offset }`.
+- List parameters: `limit` (default 10, max 100), `offset`, `sort` (`-publishedAt`; the default is newest published first), `filter[field]=value` or `filter[field][gte]=1000` (operators `eq ne lt lte gt gte contains in`), `fields`, `expand` (one level; the entry then lists the replaced fields in `expanded`), `status` (`draft`, `published`, `all`; admin only, default `published`). The response is `{ items, total, limit, offset }`.
 - Media: `POST /api/media` (multipart `file`, or JSON `{ url }` / `{ base64, filename }`), `GET /api/media`, `PATCH /api/media/:id` (`{ alt }`), `DELETE /api/media/:id`; files are served from `/media/:id/:filename`.
 - Trash: `GET /api/trash`, `POST /api/trash/:id/restore`, `DELETE /api/trash/:id?confirm=<site>`, `DELETE /api/trash?confirm=<site>`.
 - Admin: `GET/POST/DELETE /api/keys`, `GET /api/export`, `POST /api/import`, `POST /api/reset`.
@@ -245,7 +245,7 @@ Put one `<template>` inside a list (`data-femtocms`) or an article page (`data-f
 
 | Attribute | Meaning |
 |---|---|
-| `data-field="name"` | Fills in the value. Strings and numbers go in as text; multiple selections are joined with ", ". An `<img>` gets the image's `src`, `alt`, `width`, `height` and `loading="lazy"` (attributes written in the template win), and an `<img>` with no image is removed. A `<time>` gets a `datetime` attribute and a readable date. Markdown fields get the HTML the CMS rendered (only for entries the API returned directly; Markdown in an expanded reference, a `list` or a `json` value goes in as text). |
+| `data-field="name"` | Fills in the value. Strings and numbers go in as text; multiple selections are joined with ", ". An `<img>` gets the image's `src`, `alt`, `width`, `height` and `loading="lazy"` (attributes written in the template win), and an `<img>` with no image is removed. A `<time>` gets a `datetime` attribute and a readable date. Markdown fields get the HTML the CMS rendered, also for expanded references (`author.body`). Only entries the API returned get this: an object of the same shape stored inside a `list` or `json` value goes in as text. |
 | `data-if="name"` | Removes the element when the value is empty, `false`, `null` or an empty array (`0` is kept). `data-if="!soldOut"` inverts it. |
 | `data-class="name …"` | Adds the value as a class: `category-menu` when `category` is `menu`, or just `soldOut` when the value is `true`. Characters other than letters, digits, `_` and `-` are dropped. |
 | `data-href="…{name}…"` | Builds the `href`. `{slug}` (falls back to the id), `{id}` and any field name work; values are URL-encoded. Only `http(s)` and relative URLs are set. |
@@ -292,7 +292,7 @@ A list with `data-pager` can hold a second template, `<template data-pager>`. It
 
 #### Previous / next template
 
-`<template data-prevnext>` replaces the built-in previous / next links (having the template is enough; `data-prevnext` is optional then). Inside, `prev` is the older entry and `next` the newer one, so `data-field="prev.title"` or `data-if="next"` work, and `data-page="prev"` / `"next"` sets the link (or `aria-disabled="true"` when there is none). The filled template goes below the entry inside `<div class="fcms-prevnext-custom">`. Only published entries look for neighbours. Entries with exactly the same publish time do not link to each other.
+`<template data-prevnext>` replaces the built-in previous / next links (having the template is enough; `data-prevnext` is optional then). Inside, `prev` is the older entry and `next` the newer one, so `data-field="prev.title"` or `data-if="next"` work, and `data-page="prev"` / `"next"` sets the link (or `aria-disabled="true"` when there is none). The filled template goes below the entry inside `<div class="fcms-prevnext-custom">`. Only published entries look for neighbours. Entries with the same publish time are stepped through in list order.
 
 ```html
 <div data-femtocms-entry="news">

@@ -54,6 +54,10 @@ function collectionSchemas(c: Collection, n: Names): Record<string, JsonSchema> 
           type: "object", description: "Rendered HTML of each markdown field (raw HTML in the source is escaped).",
           properties: Object.fromEntries(markdown.map((m) => [m, { type: "string" }])),
         },
+        expanded: {
+          type: "array", items: { type: "string" },
+          description: "Present only when expand replaced something: the reference fields whose data value is the referenced entry (or entries) instead of ids.",
+        },
       },
       required: ["id", "slug", "status", "createdAt", "updatedAt", "publishedAt", "data", "html"],
     },

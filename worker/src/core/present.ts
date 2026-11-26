@@ -12,6 +12,8 @@ export interface ApiMedia {
 export interface ApiEntry {
   id: string; slug: string | null; status: Status; createdAt: string; updatedAt: string; publishedAt: string | null;
   data: Record<string, unknown>; html: Record<string, string>;
+  /** Reference fields whose value in `data` was replaced by the referenced entry (or entries) because of `expand`. */
+  expanded?: string[];
 }
 
 export interface PresentOpts { fields?: string[]; expand?: string[] }
@@ -105,22 +107,27 @@ function shapeEntry(
   const shown = collection.fields.filter((f) => !fieldFilter || fieldFilter.has(f.name));
   const data = shapeData(shown, r.data, lk);
   const html: Record<string, string> = {};
+  const replaced: string[] = [];
   for (const f of shown) {
     const v = own(r.data, f.name);
     if (f.type === "markdown" && typeof v === "string") html[f.name] = renderMarkdown(v);
     if (f.type === "reference" && typeof v === "string" && expanded.has(`${f.name}\0${v}`)) {
       data[f.name] = expanded.get(`${f.name}\0${v}`);
+      replaced.push(f.name);
     } else if (f.type === "reference" && f.multiple === true && Array.isArray(v)) {
       // Only expanded fields have entries in `expanded`; unreadable / missing / trashed elements are removed from the array.
       const key = (x: unknown) => `${f.name}\0${x}`;
       if (v.some((x) => typeof x === "string" && expanded.has(key(x)))) {
         data[f.name] = v.flatMap((x) => (typeof x === "string" && expanded.has(key(x)) ? (expanded.get(key(x)) ?? []) : [x]));
+        replaced.push(f.name);
       }
     }
   }
+  // `expanded` sits outside `data`, so stored values cannot fake it: clients may treat these fields as real entries
+  // (the embed script renders their html only because of this list).
   return {
     id: r.id, slug: r.slug, status: r.status, createdAt: r.createdAt, updatedAt: r.updatedAt, publishedAt: r.publishedAt,
-    data, html,
+    data, html, ...(replaced.length ? { expanded: replaced } : {}),
   };
 }
 

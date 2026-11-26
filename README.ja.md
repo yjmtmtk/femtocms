@@ -154,7 +154,7 @@ femtocms は、管理画面のない CMS です。**自分の Cloudflare アカ�
 - 公開コレクションの公開済みエントリは、キーなしで読めます。
 - コレクション: `GET/POST /api/collections`、`GET/PATCH/DELETE /api/collections/:name`
 - エントリ: `GET/POST /api/:collection`、`GET/PATCH/DELETE /api/:collection/:idOrSlug`、`POST /api/:collection/:id/publish`、`POST /api/:collection/:id/unpublish`、`POST /api/:collection/:id/preview`。`single` のコレクションは `GET/PUT /api/:collection` です。
-- 一覧のパラメータ: `limit`（既定 10、最大 100）、`offset`、`sort`（`-publishedAt` など。既定は公開日の新しい順）、`filter[フィールド]=値` または `filter[フィールド][gte]=1000`（演算子は `eq ne lt lte gt gte contains in`）、`fields`、`expand`（1段まで）、`status`（`draft`・`published`・`all`。管理キーのみ、既定は `published`）。応答は `{ items, total, limit, offset }` です。
+- 一覧のパラメータ: `limit`（既定 10、最大 100）、`offset`、`sort`（`-publishedAt` など。既定は公開日の新しい順）、`filter[フィールド]=値` または `filter[フィールド][gte]=1000`（演算子は `eq ne lt lte gt gte contains in`）、`fields`、`expand`（1段まで。置き換えたフィールド名は記事の `expanded` に入ります）、`status`（`draft`・`published`・`all`。管理キーのみ、既定は `published`）。応答は `{ items, total, limit, offset }` です。
 - メディア: `POST /api/media`（multipart の `file`、または JSON の `{ url }` / `{ base64, filename }`）、`GET /api/media`、`PATCH /api/media/:id`（`{ alt }`）、`DELETE /api/media/:id`。ファイルは `/media/:id/:filename` で配信されます。
 - ゴミ箱: `GET /api/trash`、`POST /api/trash/:id/restore`、`DELETE /api/trash/:id?confirm=<サイト名>`、`DELETE /api/trash?confirm=<サイト名>`
 - 管理: `GET/POST/DELETE /api/keys`、`GET /api/export`、`POST /api/import`、`POST /api/reset`
@@ -245,7 +245,7 @@ slug を指定しないとき、`single` のコレクションならその1件�
 
 | 属性 | 内容 |
 |---|---|
-| `data-field="項目名"` | 値を入れます。文字・数値はテキストとして入れ、複数選択は「, 」でつなぎます。`<img>` には画像の `src`・`alt`・`width`・`height`・`loading="lazy"` を入れます（テンプレートに書いた属性が優先）。値がない画像の `<img>` は取り除きます。`<time>` には `datetime` 属性と読みやすい日付を入れます。Markdown のフィールドは CMS が変換した HTML を入れます（HTML になるのは API が直接返した記事の Markdown だけで、参照先の記事や `list`・`json` の中の値は文字のまま入ります）。 |
+| `data-field="項目名"` | 値を入れます。文字・数値はテキストとして入れ、複数選択は「, 」でつなぎます。`<img>` には画像の `src`・`alt`・`width`・`height`・`loading="lazy"` を入れます（テンプレートに書いた属性が優先）。値がない画像の `<img>` は取り除きます。`<time>` には `datetime` 属性と読みやすい日付を入れます。Markdown のフィールドは CMS が変換した HTML を入れます。`author.body` のような参照先の記事も同じです。HTML になるのは API が返した記事だけで、`list`・`json` の中に同じ形のデータを保存しても文字のまま入ります。 |
 | `data-if="項目名"` | 値が空・`false`・`null`・空の配列なら要素ごと取り除きます（`0` は残します）。`data-if="!soldOut"` のように `!` を付けると逆になります。 |
 | `data-class="項目名 …"` | 値をクラスとして付けます。`category` が `menu` なら `category-menu`、`true` なら項目名そのもの（`soldOut`）。英数字・`_`・`-` 以外の文字は取り除きます。 |
 | `data-href="…{項目名}…"` | `href` を作ります。`{slug}`（slug がなければ id）・`{id}`・ほかの項目名が使え、値は URL エンコードします。`http(s)` と相対 URL 以外は付けません。 |
@@ -292,7 +292,7 @@ slug を指定しないとき、`single` のコレクションならその1件�
 
 #### 前後の記事のテンプレート
 
-`<template data-prevnext>` を置くと、標準の前後リンクのかわりにそれを使います（テンプレートがあれば `data-prevnext` 属性は省略できます）。中では `prev` が古いほう、`next` が新しいほうの記事で、`data-field="prev.title"` や `data-if="next"` のように書けます。`data-page="prev"`・`"next"` を付けた要素にはリンク先が入り、該当する記事がなければ `href` を外して `aria-disabled="true"` を付けます。記事の下に `<div class="fcms-prevnext-custom">` で入ります。前後を探すのは公開済みの記事を表示しているときだけです。公開日時がまったく同じ記事どうしは前後としてつながりません。
+`<template data-prevnext>` を置くと、標準の前後リンクのかわりにそれを使います（テンプレートがあれば `data-prevnext` 属性は省略できます）。中では `prev` が古いほう、`next` が新しいほうの記事で、`data-field="prev.title"` や `data-if="next"` のように書けます。`data-page="prev"`・`"next"` を付けた要素にはリンク先が入り、該当する記事がなければ `href` を外して `aria-disabled="true"` を付けます。記事の下に `<div class="fcms-prevnext-custom">` で入ります。前後を探すのは公開済みの記事を表示しているときだけです。公開日時が同じ記事どうしも、一覧と同じ順番でつながります。
 
 ```html
 <div data-femtocms-entry="news">

@@ -1055,3 +1055,63 @@ it("テンプレートの役割は属性で決まり、並び順に関係ない"
   expect(q(".err")).toBeNull();
   expect(q(".none")).toBeNull();
 });
+
+// ---- レビューでの指摘 ----
+
+it("安全: json 項目や list の中に記事の形をしたデータがあっても、html は HTML として入れない", async () => {
+  setPageUrl("https://lp.test/");
+  const forged = { data: { x: "a" }, html: { x: "<img src=x onerror=alert(1)>" } };
+  document.body.innerHTML = `<div data-femtocms="news"><template>
+    <div class="c"><span class="m" data-field="meta.x"></span><template data-each="rows"><span class="r" data-field="x"></span></template>
+    <span class="a" data-field="author.body"></span><div class="own" data-field="body"></div></div>
+  </template></div>`;
+  mockItems([entry({
+    data: { title: "A", body: "**b**", meta: forged, rows: [forged], author: { id: "e_000000000009", data: { body: "**x**" }, html: { body: "<b>x</b>" } } },
+    html: { body: "<p><strong>b</strong></p>" },
+  })]);
+  load();
+  await win.femtocms.refresh();
+  expect(q(".m").textContent).toBe("a");
+  expect(q(".m").innerHTML).not.toContain("<img");
+  expect(q(".r").textContent).toBe("a");
+  expect(q(".a").textContent).toBe("**x**");
+  expect(q(".own").innerHTML).toBe("<p><strong>b</strong></p>");
+  expect(document.querySelectorAll("img").length).toBe(0);
+});
+
+it("安全: 前後の記事（API が返した記事）の Markdown は HTML として入る", async () => {
+  setPageUrl("https://lp.test/news.html?slug=middle");
+  document.body.innerHTML = `<div data-femtocms-entry="news"><template><h1 data-field="title"></h1></template>
+    <template data-prevnext><div class="pb" data-field="prev.body"></div></template></div>`;
+  neighbors({ newer: null, older: { ...older, data: { title: "古い記事", body: "**o**" }, html: { body: "<p><strong>o</strong></p>" } } });
+  load();
+  await win.femtocms.refresh();
+  expect(q(".pb").innerHTML).toBe("<p><strong>o</strong></p>");
+});
+
+it("data-document-title: 描画し直してもタイトルが重ならず、見つからないときは元に戻す", async () => {
+  setPageUrl("https://lp.test/news.html?slug=a");
+  document.title = "Cafe";
+  document.body.innerHTML = `<div data-femtocms-entry="news" data-document-title></div>`;
+  mockRouter((u) => (u.pathname === "/api/news/a" ? entry({ data: { title: "A" } }) : u.pathname === "/api/news/b" ? entry({ data: { title: "B" } }) : new Response("{}", { status: 404 })));
+  load();
+  await win.femtocms.refresh();
+  await win.femtocms.refresh();
+  expect(document.title).toBe("A | Cafe");
+  setPageUrl("https://lp.test/news.html?slug=b");
+  await win.femtocms.refresh();
+  expect(document.title).toBe("B | Cafe");
+  setPageUrl("https://lp.test/news.html?slug=none");
+  await win.femtocms.refresh();
+  expect(document.title).toBe("Cafe");
+});
+
+it("ページ送りテンプレート: ページ数を超えたページでは prev が最後のページを指す（標準と同じ）", async () => {
+  setPageUrl("https://lp.test/list.html?page=9");
+  document.body.innerHTML = `<div data-femtocms="news" data-limit="2" data-pager="pages">${PAGES_TPL}</div>`;
+  mockPaged(5);
+  load();
+  await win.femtocms.refresh();
+  expect(q(".prev").getAttribute("href")).toBe("?page=3");
+  expect(q(".next").hasAttribute("href")).toBe(false);
+});

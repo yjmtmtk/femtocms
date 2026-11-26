@@ -245,7 +245,7 @@ Put one `<template>` inside a list (`data-femtocms`) or an article page (`data-f
 
 | Attribute | Meaning |
 |---|---|
-| `data-field="name"` | Fills in the value. Strings and numbers go in as text; multiple selections are joined with ", ". An `<img>` gets the image's `src`, `alt`, `width`, `height` and `loading="lazy"` (attributes written in the template win), and an `<img>` with no image is removed. A `<time>` gets a `datetime` attribute and a readable date. Markdown fields get the HTML the CMS rendered. |
+| `data-field="name"` | Fills in the value. Strings and numbers go in as text; multiple selections are joined with ", ". An `<img>` gets the image's `src`, `alt`, `width`, `height` and `loading="lazy"` (attributes written in the template win), and an `<img>` with no image is removed. A `<time>` gets a `datetime` attribute and a readable date. Markdown fields get the HTML the CMS rendered (only for entries the API returned directly; Markdown in an expanded reference, a `list` or a `json` value goes in as text). |
 | `data-if="name"` | Removes the element when the value is empty, `false`, `null` or an empty array (`0` is kept). `data-if="!soldOut"` inverts it. |
 | `data-class="name …"` | Adds the value as a class: `category-menu` when `category` is `menu`, or just `soldOut` when the value is `true`. Characters other than letters, digits, `_` and `-` are dropped. |
 | `data-href="…{name}…"` | Builds the `href`. `{slug}` (falls back to the id), `{id}` and any field name work; values are URL-encoded. Only `http(s)` and relative URLs are set. |
@@ -292,7 +292,7 @@ A list with `data-pager` can hold a second template, `<template data-pager>`. It
 
 #### Previous / next template
 
-`<template data-prevnext>` replaces the built-in previous / next links (having the template is enough; `data-prevnext` is optional then). Inside, `prev` is the older entry and `next` the newer one, so `data-field="prev.title"` or `data-if="next"` work, and `data-page="prev"` / `"next"` sets the link (or `aria-disabled="true"` when there is none). The filled template goes below the entry inside `<div class="fcms-prevnext-custom">`. Only published entries look for neighbours.
+`<template data-prevnext>` replaces the built-in previous / next links (having the template is enough; `data-prevnext` is optional then). Inside, `prev` is the older entry and `next` the newer one, so `data-field="prev.title"` or `data-if="next"` work, and `data-page="prev"` / `"next"` sets the link (or `aria-disabled="true"` when there is none). The filled template goes below the entry inside `<div class="fcms-prevnext-custom">`. Only published entries look for neighbours. Entries with exactly the same publish time do not link to each other.
 
 ```html
 <div data-femtocms-entry="news">

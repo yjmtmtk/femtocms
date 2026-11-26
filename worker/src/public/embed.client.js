@@ -203,6 +203,15 @@
 
   var templateSets = new WeakMap();
 
+  // Entries exactly as the API returned them (list items, the entry, its neighbours). Only their html is markup:
+  // an object of the same shape found inside data (a json or list field, an expanded reference) stays text.
+  var trusted = new WeakSet();
+
+  function trust(o) {
+    if (o && typeof o === "object") trusted.add(o);
+    return o;
+  }
+
   // The element's own <template> children by role; remembered, because rendering replaces the element's children.
   function templatesOf(el) {
     var found = null;
@@ -238,7 +247,7 @@
       v = isEntry(v) ? (BUILTIN[parts[i]] === 1 ? own(v, parts[i]) : own(v.data, parts[i])) : Array.isArray(v) ? undefined : own(v, parts[i]);
       if (v === undefined || v === null) return {};
     }
-    var html = isEntry(parent) ? own(parent.html, parts[parts.length - 1]) : undefined;
+    var html = isEntry(parent) && trusted.has(parent) ? own(parent.html, parts[parts.length - 1]) : undefined;
     return { value: v, html: typeof html === "string" ? html : undefined };
   }
 
@@ -539,7 +548,7 @@
       locale: localeOf(el),
       page: function (node, s) {
         var which = node.getAttribute("data-page");
-        var target = which === "prev" ? current - 1 : which === "next" ? current + 1 : which === "first" ? 1 : which === "last" ? pages
+        var target = which === "prev" ? Math.min(current - 1, pages) : which === "next" ? current + 1 : which === "first" ? 1 : which === "last" ? pages
           : which === "" && typeof s.number === "number" ? s.number : 0;
         if (target < 1 || target > pages) return disableLink(node);
         node.setAttribute("href", pageHref(el, target));
@@ -595,6 +604,7 @@
       .then(function (body) {
         if (moreState.get(el) !== state) return;
         if (!body || !Array.isArray(body.items)) throw new Error("unexpected response for " + state.collection);
+        body.items.forEach(trust);
         var ul = itemsContainer(el);
         if (ul) appendItems(el, ul, body.items);
         state.offset += body.items.length;
@@ -629,11 +639,15 @@
     return "?" + params.toString();
   }
 
+  // The page's own title, taken before the first change, so re-renders replace the entry part instead of stacking it.
+  var baseTitle = null;
+
   function setDocumentTitle(el, item) {
-    var docTitle = item.data ? item.data.title : undefined;
-    if (el.hasAttribute("data-document-title") && typeof docTitle === "string" && docTitle) {
-      document.title = document.title ? docTitle + " | " + document.title : docTitle;
-    }
+    if (!el.hasAttribute("data-document-title")) return;
+    if (baseTitle === null) baseTitle = document.title;
+    var docTitle = item && item.data ? item.data.title : undefined;
+    if (typeof docTitle === "string" && docTitle) document.title = baseTitle ? docTitle + " | " + baseTitle : docTitle;
+    else document.title = baseTitle;
   }
 
   // Detail view. The only HTML inserted as markup is item.html[field]: the CMS renders it from Markdown with raw HTML escaped and unsafe URLs removed.
@@ -677,7 +691,7 @@
 
   function firstItem(url, what) {
     return getJson(url, what)
-      .then(function (body) { return body && Array.isArray(body.items) && body.items[0] ? body.items[0] : null; })
+      .then(function (body) { return body && Array.isArray(body.items) && body.items[0] ? trust(body.items[0]) : null; })
       .catch(function (err) {
         warn(err);
         return null;
@@ -746,8 +760,10 @@
   // Without <template data-error> the element is left as it was (any loading text stays).
   function renderError(el, token, err) {
     warn(err);
+    if (latest.get(el) !== token) return;
+    setDocumentTitle(el, null);
     var tpl = templatesOf(el).error;
-    if (tpl && latest.get(el) === token) renderState(el, tpl);
+    if (tpl) renderState(el, tpl);
   }
 
   // ---- driver ------------------------------------------------------------------------------
@@ -774,6 +790,7 @@
         if (!body || !Array.isArray(body.items)) throw new Error("unexpected response for " + collection);
         // A newer render of the same element supersedes this one.
         if (latest.get(el) !== token) return;
+        body.items.forEach(trust);
         if (body.items.length) renderList(el, body.items);
         else renderEmpty(el);
         var total = typeof body.total === "number" ? body.total : body.items.length;
@@ -805,9 +822,12 @@
       .then(function () { return getJson(url, key ? collection + "/" + key : collection, true); })
       .then(function (body) {
         if (latest.get(el) !== token) return;
-        if (body === null || (!key && body && Array.isArray(body.items))) return renderEmpty(el);
+        if (body === null || (!key && body && Array.isArray(body.items))) {
+          setDocumentTitle(el, null);
+          return renderEmpty(el);
+        }
         if (!body || typeof body !== "object" || !body.data) throw new Error("unexpected response for " + collection + (key ? "/" + key : ""));
-        renderEntry(el, body);
+        renderEntry(el, trust(body));
         return renderPrevNext(el, collection, body, token);
       })
       .catch(function (err) { renderError(el, token, err); });

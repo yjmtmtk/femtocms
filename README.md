@@ -135,10 +135,11 @@ Every delete (entries, media, collections) **moves the item to the trash**. Dele
 | `collections list \| get <name> \| create \| update <name> \| delete <name>` | Manage schemas. `create` takes `--file` (JSON or YAML), or `--name`, `--label`, `--kind` and repeated `--field name:type[:required]`. |
 | `entries list <collection>` | Options `--limit`, `--offset`, `--sort`, `--filter k=v`, `--fields`, `--expand`, `--status draft\|published\|all`. Lists published entries by default. |
 | `entries get <collection> [id]` | One entry by id or slug (omit the id for a `single` collection). |
-| `entries create <collection>` / `entries update <collection> <id>` | Body from `--data <json>`, `--file post.md` (YAML front matter becomes fields, the body goes to `--body-field`) or `--set k=v`. Also `--slug`, `--publish`. |
+| `entries create <collection>` / `entries update <collection> <id>` | Body from `--data <json>`, `--file post.md` (YAML front matter becomes fields, the body goes to `--body-field`) or `--set k=v`. Also `--slug`, `--published-at <iso>`, `--publish`. |
 | `entries delete \| publish \| unpublish <collection> <id>` | Trash, publish, or turn back into a draft. |
-| `media upload <file> [--alt <text>]` / `media list` / `media delete <id>` | Manage media (up to 20 MB per file). |
-| `preview <collection> <id>` | Prints a time-limited preview URL for a draft. |
+| `media upload <file> [--alt <text>] [--filename <name>]` / `media upload --url <url> [--alt <text>] [--filename <name>]` | Upload a local file, or let the server download a URL (up to 20 MB per file). |
+| `media update <id> --alt <text>` / `media list` / `media delete <id>` | Change the alt text, list, or trash media. |
+| `preview <collection> <id> [--ttl <seconds>]` | Prints a time-limited preview URL for a draft (default 24 hours, up to 2592000 seconds = 30 days). |
 | `trash list \| restore <id> \| delete <id> \| empty` | Trash management. `delete` and `empty` take `--confirm <site name>`. |
 | `export [--out <dir>]` / `import <dir> [--replace --confirm <site name>]` | Backup and migration, see [Export and import](#export-and-import). |
 
@@ -153,7 +154,7 @@ Base: `https://<your-site>/api`, JSON in and out. The machine-readable spec, gen
 - Collections: `GET/POST /api/collections`, `GET/PATCH/DELETE /api/collections/:name`.
 - Entries: `GET/POST /api/:collection`, `GET/PATCH/DELETE /api/:collection/:idOrSlug`, `POST /api/:collection/:id/publish`, `POST /api/:collection/:id/unpublish`, `POST /api/:collection/:id/preview`. A `single` collection uses `GET/PUT /api/:collection`.
 - List parameters: `limit` (default 10, max 100), `offset`, `sort` (`-publishedAt`; the default is newest published first), `filter[field]=value` or `filter[field][gte]=1000` (operators `eq ne lt lte gt gte contains in`), `fields`, `expand` (one level), `status` (`draft`, `published`, `all`; admin only, default `published`). The response is `{ items, total, limit, offset }`.
-- Media: `POST /api/media` (multipart `file`, or JSON `{ url }` / `{ base64, filename }`), `GET /api/media`, `DELETE /api/media/:id`; files are served from `/media/:id/:filename`.
+- Media: `POST /api/media` (multipart `file`, or JSON `{ url }` / `{ base64, filename }`), `GET /api/media`, `PATCH /api/media/:id` (`{ alt }`), `DELETE /api/media/:id`; files are served from `/media/:id/:filename`.
 - Trash: `GET /api/trash`, `POST /api/trash/:id/restore`, `DELETE /api/trash/:id?confirm=<site>`, `DELETE /api/trash?confirm=<site>`.
 - Admin: `GET/POST/DELETE /api/keys`, `GET /api/export`, `POST /api/import`, `POST /api/reset`.
 - `GET /` returns a small JSON description of the site (name, version, API, MCP and OpenAPI URLs).
@@ -166,7 +167,7 @@ The MCP endpoint is `https://<your-site>/mcp` (Streamable HTTP, stateless) and n
 |---|---|
 | Collections | `list_collections`, `get_collection`, `create_collection`, `update_collection`, `delete_collection` |
 | Entries | `list_entries`, `get_entry`, `create_entry`, `update_entry`, `delete_entry`, `publish_entry`, `unpublish_entry`, `get_preview_url` |
-| Media | `upload_media` (from a URL or base64), `list_media`, `delete_media` |
+| Media | `upload_media` (from a URL or base64), `update_media` (alt text), `list_media`, `delete_media` |
 | Trash | `list_trash`, `restore_from_trash`, `delete_permanently`, `empty_trash` |
 | Keys | `create_key`, `list_keys`, `revoke_key` |
 | Data | `export_data`, `import_data`, `reset_site` |

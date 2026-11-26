@@ -135,10 +135,11 @@ femtocms は、管理画面のない CMS です。**自分の Cloudflare アカ�
 | `collections list \| get <name> \| create \| update <name> \| delete <name>` | スキーマの管理。`create` は `--file`（JSON か YAML）、または `--name`・`--label`・`--kind` と、繰り返し指定できる `--field name:type[:required]` で指定します。 |
 | `entries list <collection>` | オプション: `--limit`、`--offset`、`--sort`、`--filter k=v`、`--fields`、`--expand`、`--status draft\|published\|all`。既定は公開済みのみです。 |
 | `entries get <collection> [id]` | 1件を id か slug で取得（`single` のコレクションは id 省略可）。 |
-| `entries create <collection>` / `entries update <collection> <id>` | 本文は `--data <json>`、`--file post.md`（先頭の YAML front matter がフィールドに、本文が `--body-field` に入る）、`--set k=v` のいずれかで渡します。`--slug`、`--publish` も使えます。 |
+| `entries create <collection>` / `entries update <collection> <id>` | 本文は `--data <json>`、`--file post.md`（先頭の YAML front matter がフィールドに、本文が `--body-field` に入る）、`--set k=v` のいずれかで渡します。`--slug`、`--published-at <iso>`、`--publish` も使えます。 |
 | `entries delete \| publish \| unpublish <collection> <id>` | ゴミ箱へ移す／公開する／下書きに戻す。 |
-| `media upload <file> [--alt <text>]` / `media list` / `media delete <id>` | メディアの管理（1ファイル 20MB まで）。 |
-| `preview <collection> <id>` | 下書き確認用の、期限付きプレビュー URL を出力します。 |
+| `media upload <file> [--alt <text>] [--filename <name>]` / `media upload --url <url> [--alt <text>] [--filename <name>]` | ローカルのファイルをアップロードするか、URL のファイルをサーバに取得させます（1ファイル 20MB まで）。 |
+| `media update <id> --alt <text>` / `media list` / `media delete <id>` | 代替テキストの変更・一覧・ゴミ箱へ移す。 |
+| `preview <collection> <id> [--ttl <秒>]` | 下書き確認用の、期限付きプレビュー URL を出力します（既定 24 時間、最長 2592000 秒 = 30 日）。 |
 | `trash list \| restore <id> \| delete <id> \| empty` | ゴミ箱の管理。`delete` と `empty` は `--confirm <サイト名>` を取ります。 |
 | `export [--out <dir>]` / `import <dir> [--replace --confirm <サイト名>]` | バックアップと移行（[export と import](#export-と-import)を参照）。 |
 
@@ -153,7 +154,7 @@ femtocms は、管理画面のない CMS です。**自分の Cloudflare アカ�
 - コレクション: `GET/POST /api/collections`、`GET/PATCH/DELETE /api/collections/:name`
 - エントリ: `GET/POST /api/:collection`、`GET/PATCH/DELETE /api/:collection/:idOrSlug`、`POST /api/:collection/:id/publish`、`POST /api/:collection/:id/unpublish`、`POST /api/:collection/:id/preview`。`single` のコレクションは `GET/PUT /api/:collection` です。
 - 一覧のパラメータ: `limit`（既定 10、最大 100）、`offset`、`sort`（`-publishedAt` など。既定は公開日の新しい順）、`filter[フィールド]=値` または `filter[フィールド][gte]=1000`（演算子は `eq ne lt lte gt gte contains in`）、`fields`、`expand`（1段まで）、`status`（`draft`・`published`・`all`。管理キーのみ、既定は `published`）。応答は `{ items, total, limit, offset }` です。
-- メディア: `POST /api/media`（multipart の `file`、または JSON の `{ url }` / `{ base64, filename }`）、`GET /api/media`、`DELETE /api/media/:id`。ファイルは `/media/:id/:filename` で配信されます。
+- メディア: `POST /api/media`（multipart の `file`、または JSON の `{ url }` / `{ base64, filename }`）、`GET /api/media`、`PATCH /api/media/:id`（`{ alt }`）、`DELETE /api/media/:id`。ファイルは `/media/:id/:filename` で配信されます。
 - ゴミ箱: `GET /api/trash`、`POST /api/trash/:id/restore`、`DELETE /api/trash/:id?confirm=<サイト名>`、`DELETE /api/trash?confirm=<サイト名>`
 - 管理: `GET/POST/DELETE /api/keys`、`GET /api/export`、`POST /api/import`、`POST /api/reset`
 - `GET /` は、サイトの簡単な紹介（名前・バージョン・API/MCP/OpenAPI の URL）を JSON で返します。
@@ -166,7 +167,7 @@ MCP のエンドポイントは `https://<サイト>/mcp`（Streamable HTTP、�
 |---|---|
 | コレクション | `list_collections`、`get_collection`、`create_collection`、`update_collection`、`delete_collection` |
 | エントリ | `list_entries`、`get_entry`、`create_entry`、`update_entry`、`delete_entry`、`publish_entry`、`unpublish_entry`、`get_preview_url` |
-| メディア | `upload_media`（URL または base64）、`list_media`、`delete_media` |
+| メディア | `upload_media`（URL または base64）、`update_media`（代替テキスト）、`list_media`、`delete_media` |
 | ゴミ箱 | `list_trash`、`restore_from_trash`、`delete_permanently`、`empty_trash` |
 | キー | `create_key`、`list_keys`、`revoke_key` |
 | データ | `export_data`、`import_data`、`reset_site` |

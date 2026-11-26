@@ -101,6 +101,7 @@ export interface EntryWriteOpts {
   bodyField?: string;
   slug?: string;
   publish?: boolean;
+  publishedAt?: string;
 }
 
 /** `k=v` -> `filter[k]=v`, `k[op]=v` -> `filter[k][op]=v`. */
@@ -237,27 +238,38 @@ async function buildEntryInput(
 export async function entriesCreate(client: FemtoClient, collection: string, opts: EntryWriteOpts): Promise<unknown> {
   // create needs the collection's kind: a single collection is written with PUT (like MCP create_entry).
   const { data, slug, kind } = await buildEntryInput(client, collection, opts, true);
+  const publishedAt = opts.publishedAt;
   if (kind === "single") {
     if (slug !== undefined) throw new Error(`コレクション "${collection}" は single のため --slug は使えません`);
+    if (publishedAt !== undefined) {
+      throw new Error(`コレクション "${collection}" は single のため作成時に --published-at は使えません（作成後に entries update <collection> <id> --published-at で設定してください）`);
+    }
     return client.request("PUT", `/api/${encodeURIComponent(collection)}`, {
       json: { data, ...(opts.publish && { status: "published" }) },
     });
   }
   return client.request("POST", `/api/${encodeURIComponent(collection)}`, {
-    json: { data, ...(slug !== undefined && { slug }), ...(opts.publish && { status: "published" }) },
+    json: {
+      data, ...(slug !== undefined && { slug }), ...(opts.publish && { status: "published" }),
+      ...(publishedAt !== undefined && { publishedAt }),
+    },
   });
 }
 
 export async function entriesUpdate(client: FemtoClient, [collection, id]: EntryRef, opts: EntryWriteOpts): Promise<unknown> {
   const { data, slug } = await buildEntryInput(client, collection, opts, false);
-  const changed = Object.keys(data).length > 0 || slug !== undefined;
+  const publishedAt = opts.publishedAt;
+  const changed = Object.keys(data).length > 0 || slug !== undefined || publishedAt !== undefined;
   if (!changed && !opts.publish) {
-    throw new Error("更新する内容がありません（--data / --set / --file / --slug / --publish のいずれかを指定してください）");
+    throw new Error("更新する内容がありません（--data / --set / --file / --slug / --published-at / --publish のいずれかを指定してください）");
   }
   let result: unknown;
   if (changed) {
     result = await client.request("PATCH", entryPath(collection, id), {
-      json: { ...(Object.keys(data).length > 0 && { data }), ...(slug !== undefined && { slug }) },
+      json: {
+        ...(Object.keys(data).length > 0 && { data }), ...(slug !== undefined && { slug }),
+        ...(publishedAt !== undefined && { publishedAt }),
+      },
     });
   }
   return opts.publish ? client.request("POST", entryPath(collection, id, "/publish")) : result;
@@ -287,12 +299,30 @@ const MIME_BY_EXT: Record<string, string> = {
 export const mimeFromPath = (path: string): string =>
   MIME_BY_EXT[extname(path).slice(1).toLowerCase()] ?? "application/octet-stream";
 
-export async function mediaUpload(client: FemtoClient, path: string, opts: { alt?: string }): Promise<unknown> {
-  const bytes = new Uint8Array(readFileSync(path));
+export interface MediaUploadOpts { alt?: string; url?: string; filename?: string }
+
+/** A local file (multipart) or, with --url, a remote file the server downloads (JSON { url }). Exactly one of the two. */
+export async function mediaUpload(client: FemtoClient, path: string | undefined, opts: MediaUploadOpts): Promise<unknown> {
+  if ((path === undefined) === (opts.url === undefined)) {
+    throw new Error("アップロードするファイルのパスか --url <url> のどちらか一方を指定してください");
+  }
+  if (opts.url !== undefined) {
+    return client.request("POST", "/api/media", {
+      json: {
+        url: opts.url, ...(opts.alt !== undefined && { alt: opts.alt }), ...(opts.filename !== undefined && { filename: opts.filename }),
+      },
+    });
+  }
+  const bytes = new Uint8Array(readFileSync(path!));
   const form = new FormData();
-  form.set("file", new Blob([bytes], { type: mimeFromPath(path) }), basename(path));
+  form.set("file", new Blob([bytes], { type: mimeFromPath(path!) }), opts.filename ?? basename(path!));
   if (opts.alt !== undefined) form.set("alt", opts.alt);
   return client.request("POST", "/api/media", { body: form });
+}
+
+export async function mediaUpdate(client: FemtoClient, id: string, opts: { alt?: string }): Promise<unknown> {
+  if (opts.alt === undefined) throw new Error("変更する内容がありません（--alt <text> を指定してください）");
+  return client.request("PATCH", `/api/media/${encodeURIComponent(id)}`, { json: { alt: opts.alt } });
 }
 
 export async function mediaList(client: FemtoClient, opts: { limit?: string | number; offset?: string | number }): Promise<unknown> {
@@ -309,8 +339,16 @@ export async function mediaDelete(client: FemtoClient, id: string, _opts: object
   return { trashed: id };
 }
 
-export async function previewCmd(client: FemtoClient, [collection, id]: EntryRef, _opts: object): Promise<unknown> {
-  return client.request("POST", entryPath(collection, id, "/preview"));
+/** Same bounds as the server (core/preview.ts MAX_PREVIEW_TTL_SECONDS): 1 second to 30 days. */
+const MAX_PREVIEW_TTL_SECONDS = 30 * 24 * 60 * 60;
+
+export async function previewCmd(client: FemtoClient, [collection, id]: EntryRef, opts: { ttl?: string }): Promise<unknown> {
+  if (opts.ttl === undefined) return client.request("POST", entryPath(collection, id, "/preview"));
+  const ttl = /^\d+$/.test(opts.ttl) ? Number(opts.ttl) : NaN;
+  if (!(Number.isInteger(ttl) && ttl >= 1 && ttl <= MAX_PREVIEW_TTL_SECONDS)) {
+    throw new Error(`--ttl は 1〜${MAX_PREVIEW_TTL_SECONDS} の整数（秒）で指定してください（受け取った値: "${opts.ttl}"）`);
+  }
+  return client.request("POST", entryPath(collection, id, "/preview"), { json: { ttlSeconds: ttl } });
 }
 
 // --- trash --------------------------------------------------------------------------------------
@@ -429,6 +467,7 @@ export function registerContent(program: Command): void {
       .option("--file <path>", "Markdown ファイル（先頭の YAML front matter を data に、本文を --body-field に入れる）")
       .option("--body-field <name>", "本文を入れるフィールド（既定: 最初の markdown フィールド）")
       .option("--slug <slug>", "slug")
+      .option("--published-at <iso>", "公開日時（ISO 8601、例: 2026-11-26T09:00:00Z）")
       .option("--publish", "公開する");
   const written = (verb: string) => (r: unknown) => `${verb}しました: ${str((r as Obj).id)} (${str((r as Obj).status)})`;
 
@@ -463,11 +502,20 @@ export function registerContent(program: Command): void {
 
   const media = program.command("media").description("メディアを管理します");
   media
-    .command("upload <file>")
-    .description("ファイルをアップロード（multipart）")
+    .command("upload [file]")
+    .description("ファイルをアップロード（ローカルのファイルか --url のどちらか一方）")
+    .option("--url <url>", "サーバに取得させる http(s) の URL（ファイルの代わりに）")
     .option("--alt <text>", "代替テキスト")
-    .action(guarded(async (file: string, o: { alt?: string }, cmd: Command) => {
+    .option("--filename <name>", "保存するファイル名（省略時はファイル名か URL の末尾）")
+    .action(guarded(async (file: string | undefined, o: MediaUploadOpts, cmd: Command) => {
       out(cmd, await mediaUpload(clientFor(cmd), file, o), (r) => `${str((r as Obj).id)}  ${str((r as Obj).url)}`);
+    }));
+  media
+    .command("update <id>")
+    .description("メディアの代替テキストを変える（ファイルと URL はそのまま）")
+    .option("--alt <text>", "新しい代替テキスト（空文字で消す）")
+    .action(guarded(async (id: string, o: { alt?: string }, cmd: Command) => {
+      out(cmd, await mediaUpdate(clientFor(cmd), id, o), () => `更新しました: ${id}`);
     }));
   media
     .command("list")
@@ -490,7 +538,8 @@ export function registerContent(program: Command): void {
   program
     .command("preview <collection> <id>")
     .description("下書きの確認用プレビュー URL を出力")
-    .action(guarded(async (c: string, id: string, o: object, cmd: Command) => {
+    .option("--ttl <seconds>", "有効期間（秒、1〜2592000。既定 86400 = 24 時間）")
+    .action(guarded(async (c: string, id: string, o: { ttl?: string }, cmd: Command) => {
       out(cmd, await previewCmd(clientFor(cmd), [c, id], o), (r) => str((r as Obj).url));
     }));
 

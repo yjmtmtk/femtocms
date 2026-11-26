@@ -97,13 +97,13 @@ describe("ツール一覧", () => {
       "delete_permanently", "empty_trash", "export_data", "get_collection", "get_entry", "get_preview_url",
       "import_data", "list_collections", "list_entries", "list_keys", "list_media", "list_trash", "publish_entry",
       "reset_site", "restore_from_trash", "revoke_key", "unpublish_entry", "update_collection", "update_entry",
-      "upload_media",
+      "update_media", "upload_media",
     ]);
     const tool = (n: string) => tools.find((t) => t.name === n)!;
     for (const n of ["empty_trash", "delete_permanently", "reset_site", "import_data", "delete_entry", "delete_collection", "delete_media", "revoke_key"]) {
       expect(tool(n).annotations?.destructiveHint, n).toBe(true);
     }
-    for (const n of ["create_collection", "update_collection", "create_entry", "update_entry", "publish_entry", "unpublish_entry", "upload_media", "get_preview_url", "restore_from_trash", "create_key"]) {
+    for (const n of ["create_collection", "update_collection", "create_entry", "update_entry", "publish_entry", "unpublish_entry", "upload_media", "update_media", "get_preview_url", "restore_from_trash", "create_key"]) {
       expect(tool(n).annotations?.destructiveHint, n).toBe(false);
     }
     for (const n of ["list_collections", "get_collection", "list_entries", "get_entry", "list_media", "list_trash", "list_keys", "export_data"]) {
@@ -206,6 +206,15 @@ describe("流れ", () => {
     expect((await call(client, "list_entries", { collection: "site" })).structuredContent.id).toBe(first.structuredContent.id);
   });
 
+  it("create_entry は publishedAt を受け取る（HTTP POST と同じ）", async () => {
+    const client = await connect(K);
+    await call(client, "create_collection", news);
+    const r = await call(client, "create_entry", { collection: "news", data: { title: "t" }, status: "published", publishedAt: "2026-01-02T03:04:05Z" });
+    expect(r.structuredContent.publishedAt).toBe("2026-01-02T03:04:05.000Z");
+    const bad = await call(client, "create_entry", { collection: "news", data: { title: "t" }, publishedAt: "yesterday" });
+    expect(errorOf(bad).issues[0].path).toBe("publishedAt");
+  });
+
   it("list コレクションで get_entry に id が無いと bad_request", async () => {
     const client = await connect(K);
     await call(client, "create_collection", news);
@@ -285,6 +294,15 @@ describe("メディア", () => {
     expect((await call(client, "list_media")).structuredContent).toMatchObject({ total: 1, items: [{ id: m.id }] });
     expect((await call(client, "delete_media", { id: m.id })).structuredContent).toEqual({ deleted: true, id: m.id });
     expect((await call(client, "list_media")).structuredContent.total).toBe(0);
+  });
+
+  it("update_media で alt を変えられる（HTTP の PATCH /api/media/:id と同じ）", async () => {
+    const client = await connect(K);
+    const m = (await call(client, "upload_media", { base64: btoa(String.fromCharCode(...fixtures.png)), filename: "p.png" })).structuredContent;
+    const r = await call(client, "update_media", { id: m.id, alt: "新しい説明" });
+    expect(r.structuredContent).toMatchObject({ id: m.id, alt: "新しい説明", url: m.url });
+    expect((await call(client, "list_media")).structuredContent.items[0].alt).toBe("新しい説明");
+    expect(errorOf(await call(client, "update_media", { id: "m_000000000000", alt: "x" })).code).toBe("not_found");
   });
 
   it("url から取り込める（外部 fetch はモック）", async () => {

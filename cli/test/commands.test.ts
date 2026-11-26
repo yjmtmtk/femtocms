@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FemtoClient } from "../src/client";
 import {
   collectionsCreate, collectionsDelete, collectionsUpdate, entriesCreate, entriesDelete, entriesGet, entriesList, entriesPublish,
-  entriesUpdate, mediaUpload, previewCmd, trashDelete, trashEmpty, trashRestore,
+  entriesUpdate, mediaUpdate, mediaUpload, previewCmd, trashDelete, trashEmpty, trashRestore,
 } from "../src/commands/content";
 import { exportCmd, importCmd, keysCreate, keysRevoke, resetCmd } from "../src/commands/admin";
 import { setExit } from "../src/output";
@@ -146,6 +146,12 @@ describe("entries create", () => {
     expect(r.calls[1]!.json).toEqual({ data: { title: "a" }, slug: "a" });
   });
 
+  it("--published-at は body の publishedAt になる", async () => {
+    const r = recorder({ "GET /api/collections/news": newsCollection, "POST /api/news": entry });
+    await entriesCreate(r.client, "news", { data: '{"title":"a"}', publishedAt: "2026-01-02T03:04:05Z", publish: true });
+    expect(r.calls[1]!.json).toEqual({ data: { title: "a" }, status: "published", publishedAt: "2026-01-02T03:04:05Z" });
+  });
+
   it("--set は型に合わせて変換する", async () => {
     const r = recorder({ "GET /api/collections/news": newsCollection, "POST /api/news": entry });
     await entriesCreate(r.client, "news", {
@@ -237,6 +243,8 @@ describe("single collections", () => {
     await entriesCreate(r.client, "about", { data: '{"title":"x"}' });
     expect(r.calls.filter((c) => c.method === "PUT")[1]!.json).toEqual({ data: { title: "x" } });
     await expect(entriesCreate(r.client, "about", { data: "{}", slug: "s" })).rejects.toThrow("slug");
+    await expect(entriesCreate(r.client, "about", { data: "{}", publishedAt: "2026-01-01T00:00:00Z" })).rejects.toThrow("--published-at");
+    expect(r.calls.filter((c) => c.method === "PUT")).toHaveLength(2);
   });
 
   it("entries get は id 省略で single の GET /api/<c>。list で id 省略はエラー", async () => {
@@ -265,6 +273,13 @@ describe("entries update / publish", () => {
     ]);
     expect(r.calls[0]!.json).toEqual({ data: { title: "x" } });
     expect(result).toMatchObject({ status: "published" });
+  });
+
+  it("update --published-at だけでも PATCH { publishedAt } を送る", async () => {
+    const r = recorder({ "PATCH /api/news/e1": entry });
+    await entriesUpdate(r.client, ["news", "e1"], { publishedAt: "2026-01-02T00:00:00Z" });
+    expect(r.calls.map((c) => `${c.method} ${c.path}`)).toEqual(["PATCH /api/news/e1"]);
+    expect(r.calls[0]!.json).toEqual({ publishedAt: "2026-01-02T00:00:00Z" });
   });
 
   it("update に変更内容が無ければエラー。publish / unpublish / delete は対応する API を呼ぶ", async () => {
@@ -306,6 +321,44 @@ describe("media / preview", () => {
   it("preview は POST して url を返す", async () => {
     const r = recorder({ "POST /api/news/e1/preview": { url: "https://cms.test/preview/t", token: "t", expiresAt: "x" } });
     expect(await previewCmd(r.client, ["news", "e1"], {})).toMatchObject({ url: "https://cms.test/preview/t" });
+    expect(r.calls[0]!.json).toBeUndefined();
+  });
+
+  it("preview --ttl は ttlSeconds を送る。1..2592000 の整数でなければリクエスト前にエラー", async () => {
+    const r = recorder({ "POST /api/news/e1/preview": { url: "https://cms.test/preview/t", token: "t", expiresAt: "x" } });
+    await previewCmd(r.client, ["news", "e1"], { ttl: "3600" });
+    expect(r.calls[0]!.json).toEqual({ ttlSeconds: 3600 });
+    for (const ttl of ["0", "2592001", "1.5", "abc", ""]) {
+      await expect(previewCmd(r.client, ["news", "e1"], { ttl }), ttl).rejects.toThrow("--ttl");
+    }
+    expect(r.calls).toHaveLength(1);
+  });
+
+  it("media upload --url は JSON { url, alt, filename } を送る。ファイルと --url はどちらか一方だけ", async () => {
+    const r = recorder({ "POST /api/media": { id: "m_000000000001" } });
+    await mediaUpload(r.client, undefined, { url: "https://img.test/a.png", alt: "説明", filename: "b.png" });
+    expect(r.calls[0]!.json).toEqual({ url: "https://img.test/a.png", alt: "説明", filename: "b.png" });
+    await mediaUpload(r.client, undefined, { url: "https://img.test/a.png" });
+    expect(r.calls[1]!.json).toEqual({ url: "https://img.test/a.png" });
+    await expect(mediaUpload(r.client, undefined, {})).rejects.toThrow("--url");
+    await expect(mediaUpload(r.client, file("x.png", "x"), { url: "https://img.test/a.png" })).rejects.toThrow("--url");
+    expect(r.calls).toHaveLength(2);
+  });
+
+  it("media upload <file> --filename は送るファイル名を変える", async () => {
+    const r = recorder({ "POST /api/media": { id: "m_000000000001" } });
+    await mediaUpload(r.client, file("x.png", "x"), { filename: "hero.png" });
+    expect(((r.calls[0]!.body as FormData).get("file") as File).name).toBe("hero.png");
+  });
+
+  it("media update --alt は PATCH /api/media/:id { alt }。--alt が無ければエラー", async () => {
+    const r = recorder({ "PATCH /api/media/m_000000000001": { id: "m_000000000001", alt: "新" } });
+    expect(await mediaUpdate(r.client, "m_000000000001", { alt: "新" })).toMatchObject({ alt: "新" });
+    expect(r.calls[0]!.json).toEqual({ alt: "新" });
+    await mediaUpdate(r.client, "m_000000000001", { alt: "" });
+    expect(r.calls[1]!.json).toEqual({ alt: "" });
+    await expect(mediaUpdate(r.client, "m_000000000001", {})).rejects.toThrow("--alt");
+    expect(r.calls).toHaveLength(2);
   });
 });
 
@@ -599,6 +652,25 @@ describe("commander wiring", () => {
     vi.stubGlobal("fetch", r.fetchImpl);
     await run("keys", "create", "--name", "site");
     expect(out.join("")).toContain("fcms_read_NEWKEY");
+  });
+
+  it("--published-at / preview --ttl / media upload --url / media update が配線される", async () => {
+    const r = recorder({
+      "GET /api/collections/news": newsCollection, "POST /api/news": entry, "PATCH /api/news/e1": entry,
+      "POST /api/news/e1/preview": { url: "https://cms.test/preview/tok" }, "POST /api/media": { id: "m_1", url: "u" },
+      "PATCH /api/media/m_1": { id: "m_1", alt: "a" },
+    });
+    vi.stubGlobal("fetch", r.fetchImpl);
+    await run("entries", "create", "news", "--set", "title=A", "--published-at", "2026-01-01T00:00:00Z");
+    expect(r.calls.find((c) => c.method === "POST")!.json.publishedAt).toBe("2026-01-01T00:00:00Z");
+    await run("entries", "update", "news", "e1", "--published-at", "2026-01-02T00:00:00Z");
+    expect(r.calls.at(-1)!.json).toEqual({ publishedAt: "2026-01-02T00:00:00Z" });
+    await run("preview", "news", "e1", "--ttl", "60");
+    expect(r.calls.at(-1)!.json).toEqual({ ttlSeconds: 60 });
+    await run("media", "upload", "--url", "https://img.test/a.png", "--alt", "x");
+    expect(r.calls.at(-1)!.json).toEqual({ url: "https://img.test/a.png", alt: "x" });
+    await run("media", "update", "m_1", "--alt", "a");
+    expect(r.calls.at(-1)).toMatchObject({ method: "PATCH", path: "/api/media/m_1", json: { alt: "a" } });
   });
 
   it("preview は URL だけを出力する", async () => {

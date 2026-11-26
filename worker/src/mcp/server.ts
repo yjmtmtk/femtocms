@@ -11,7 +11,7 @@ import {
 } from "../core/entries";
 import { FemtoError } from "../core/errors";
 import { createKey, listKeys, revokeKey } from "../core/keys";
-import { importMediaFromUrl, listMedia, uploadMediaBase64 } from "../core/media";
+import { importMediaFromUrl, listMedia, updateMedia, uploadMediaBase64 } from "../core/media";
 import { presentEntries, presentEntry, presentMedia } from "../core/present";
 import { createPreviewUrl, MAX_PREVIEW_TTL_SECONDS } from "../core/preview";
 import { parseListParams } from "../core/query";
@@ -199,18 +199,19 @@ export function buildMcpServer(ctx: Ctx): McpServer {
       "Create an entry in a collection. Before calling, call get_collection to see the fields and their descriptions. " +
       "Entries are created as drafts unless status is \"published\". Required fields are only enforced when publishing. " +
       "Put field values in `data` using the exact field names (images and references take an id). " +
-      "For a \"single\" collection this sets its one entry (replacing the data if it already exists); `slug` is ignored there.",
+      "For a \"single\" collection this sets its one entry (replacing the data if it already exists); `slug` and `publishedAt` are ignored there (use update_entry for publishedAt).",
     inputSchema: {
       collection: collectionName,
       data: z.record(z.string(), z.unknown()).describe("Field values keyed by field name, e.g. { \"title\": \"Hello\", \"body\": \"# Markdown\" }. Use null to leave a field unset."),
       slug: z.string().optional().describe("URL-friendly id: lowercase letters, digits, hyphens (max 64). Optional."),
       status: z.enum(["draft", "published"]).optional().describe("\"draft\" (default) or \"published\". Prefer draft, then get_preview_url, then publish_entry."),
+      publishedAt: z.string().optional().describe("ISO 8601 publication date, e.g. \"2026-11-26T09:00:00Z\". Defaults to the time of publishing."),
     },
-  }, ({ collection: name, data, slug, status }) => run(async () => {
+  }, ({ collection: name, data, slug, status, publishedAt }) => run(async () => {
     const collection = await getCollection(ctx, name);
     const record = collection.kind === "single"
       ? await putSingle(ctx, name, { data, status })
-      : await createEntry(ctx, name, { data, slug, status });
+      : await createEntry(ctx, name, { data, slug, status, publishedAt });
     return { ...(await presentEntry(ctx, collection, record, {})) };
   }));
 
@@ -311,6 +312,15 @@ export function buildMcpServer(ctx: Ctx): McpServer {
     const page = await listMedia(ctx, { limit, offset });
     return { ...page, items: page.items.map((m) => presentMedia(ctx, m)) };
   }));
+
+  server.registerTool("update_media", {
+    annotations: WRITE,
+    description: "Change a media file's alternative text. The file itself and its URL stay the same.",
+    inputSchema: {
+      id: z.string().describe("Media id (m_...). Use list_media to find it."),
+      alt: z.string().describe("New alternative text describing the image (accessibility). An empty string clears it."),
+    },
+  }, ({ id, alt }) => run(async () => ({ ...presentMedia(ctx, await updateMedia(ctx, id, { alt })) })));
 
   server.registerTool("delete_media", {
     description: `Delete a media file. ${trashNote}`,

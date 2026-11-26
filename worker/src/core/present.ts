@@ -36,11 +36,18 @@ const isObject = (v: unknown): v is Record<string, unknown> =>
 
 type MediaMap = Map<string, ApiMedia>;
 
+// Only well-formed media ids are looked up; anything else stored in an image field is legacy data and passes through.
+const MEDIA_ID_RE = /^m_[0-9a-z]{12}$/;
+const isMediaId = (v: unknown): v is string => typeof v === "string" && MEDIA_ID_RE.test(v);
+
+// Own properties only, so a field named "constructor" or "toString" never picks up Object.prototype.
+const own = (data: Record<string, unknown>, name: string): unknown => (Object.hasOwn(data, name) ? data[name] : undefined);
+
 // Walks the stored values of `fields` the same way shapeData does and collects image ids (lists included).
 function collectMediaIds(fields: FieldDef[], data: Record<string, unknown>, into: Set<string>): void {
   for (const f of fields) {
-    const v = data[f.name];
-    if (f.type === "image" && typeof v === "string") into.add(v);
+    const v = own(data, f.name);
+    if (f.type === "image" && isMediaId(v)) into.add(v);
     else if (f.type === "list" && Array.isArray(v)) {
       for (const item of v) if (isObject(item)) collectMediaIds(f.fields ?? [], item, into);
     }
@@ -51,9 +58,9 @@ function collectMediaIds(fields: FieldDef[], data: Record<string, unknown>, into
 function shapeData(fields: FieldDef[], data: Record<string, unknown>, media: MediaMap): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const f of fields) {
-    if (!(f.name in data)) continue;
+    if (!Object.hasOwn(data, f.name)) continue;
     const v = data[f.name];
-    if (f.type === "image" && typeof v === "string") out[f.name] = media.get(v) ?? null;
+    if (f.type === "image" && isMediaId(v)) out[f.name] = media.get(v) ?? null;
     else if (f.type === "list" && Array.isArray(v)) {
       out[f.name] = v.map((item) => (isObject(item) ? shapeData(f.fields ?? [], item, media) : item));
     } else out[f.name] = v;
@@ -69,7 +76,7 @@ function shapeEntry(
   const data = shapeData(shown, r.data, media);
   const html: Record<string, string> = {};
   for (const f of shown) {
-    const v = r.data[f.name];
+    const v = own(r.data, f.name);
     if (f.type === "markdown" && typeof v === "string") html[f.name] = renderMarkdown(v);
     if (f.type === "reference" && typeof v === "string" && expanded.has(`${f.name}\0${v}`)) {
       data[f.name] = expanded.get(`${f.name}\0${v}`);
@@ -105,7 +112,7 @@ async function loadExpanded(
   const keys = new Map<string, { field: FieldDef; id: string }>();
   for (const r of records) {
     for (const f of wanted) {
-      const v = r.data[f.name];
+      const v = own(r.data, f.name);
       if (typeof v === "string") keys.set(`${f.name}\0${v}`, { field: f, id: v });
     }
   }

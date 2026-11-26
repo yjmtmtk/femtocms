@@ -102,6 +102,20 @@ describe("presentEntries", () => {
     expect(b.data.cover).toBeNull();
     expect(c.data.cover).toBe(5);
   });
+  it("id の形でない古い画像値はそのまま返し、問い合わせない", async () => {
+    const [e] = await presentEntries(admin(), withCover, [rec({ cover: "legacy-string" })], {});
+    expect(e.data.cover).toBe("legacy-string");
+  });
+  it("保存されていない constructor / toString などのフィールドは出さない", async () => {
+    const c: Collection = { ...news, fields: [
+      { name: "constructor", type: "text" }, { name: "toString", type: "markdown" },
+      { name: "valueOf", type: "image" }, { name: "hasOwnProperty", type: "reference", collection: "news" } ] };
+    const [e] = await presentEntries(admin(), c, [rec({ title: "x" })], { expand: ["hasOwnProperty"] });
+    expect(e.data).toEqual({});
+    expect(e.html).toEqual({});
+    const [s] = await presentEntries(admin(), c, [rec({ constructor: "stored" })], {});
+    expect(s.data).toEqual({ constructor: "stored" });
+  });
   it("画像のクエリは複数レコードでも1回にまとまる", async () => {
     await insertMedia("m_aaaaaaaaaaaa");
     await insertMedia("m_bbbbbbbbbbbb");

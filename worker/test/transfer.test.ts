@@ -258,6 +258,31 @@ describe("importData", () => {
     expect(spy).not.toHaveBeenCalled();
     expect((await exportData(admin())).media[0]).toMatchObject({ filename: "d.jpg", mimeType: "image/jpeg", size: fixtures.png.byteLength });
   });
+  it("R2 の確認はメディアごとの head ではなく media/ の list をページごとにまとめて行う", async () => {
+    await createCollection(admin(), newsDef);
+    const ids: string[] = [];
+    for (let i = 0; i < 5; i++) ids.push((await uploadMedia(admin(), { bytes: fixtures.png, filename: `p${i}.png` })).id);
+    const dump = await exportData(admin());
+    for (const m of dump.media) delete (m as Partial<typeof m>).url;
+    await env.DB.prepare("DELETE FROM media").run();
+
+    const ctx = admin();
+    const calls = { head: 0, list: 0 };
+    const bucket = new Proxy(ctx.bucket, { get(t, p) {
+      const v = Reflect.get(t, p) as unknown;
+      if (p === "head") return (...a: unknown[]) => { calls.head++; return (v as (...x: unknown[]) => unknown).apply(t, a); };
+      // a tiny page size, so several pages are needed
+      if (p === "list") return (o: R2ListOptions) => { calls.list++; return t.list({ ...o, limit: 2 }); };
+      return typeof v === "function" ? v.bind(t) : v;
+    } });
+    await importData({ ...ctx, bucket }, { data: dump, mode: "merge" });
+    expect(calls.head).toBe(0);
+    expect(calls.list).toBe(3); // 5 objects, 2 per page
+    const exported = (await exportData(admin())).media;
+    expect(exported.map((m) => m.id).sort()).toEqual([...ids].sort());
+    expect(exported.every((m) => m.size === fixtures.png.byteLength)).toBe(true);
+  });
+
   it("自サイトの url で R2 に実体があれば fetch せずに済ます", async () => {
     await seed();
     const dump = await exportData(admin());

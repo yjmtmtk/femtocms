@@ -180,6 +180,27 @@ async function select<T>(ctx: Ctx, sql: string, values: unknown[]): Promise<T[]>
   return (await ctx.db.prepare(sql).bind(JSON.stringify(values)).all<T>()).results;
 }
 
+/**
+ * Sizes of the R2 objects `media/<id>` for the given ids. Instead of one `head` per media (a subrequest each, which a big
+ * import would run out of), it pages through the `media/` prefix: one `list` call per 1000 stored objects, stopping as
+ * soon as every id has been seen. The cost grows with the bucket, not with the import, and stays small for a CMS-sized bucket.
+ */
+async function r2Sizes(ctx: Ctx, ids: Set<string>): Promise<Map<string, number>> {
+  const sizes = new Map<string, number>();
+  if (ids.size === 0) return sizes;
+  const prefix = r2Key("");
+  let cursor: string | undefined;
+  do {
+    const page = await ctx.bucket.list({ prefix, cursor, limit: 1000 });
+    for (const o of page.objects) {
+      const id = o.key.slice(prefix.length);
+      if (ids.has(id)) sizes.set(id, o.size);
+    }
+    cursor = page.truncated && sizes.size < ids.size ? page.cursor : undefined;
+  } while (cursor);
+  return sizes;
+}
+
 /** Checks the whole export against the current DB and returns what to write. Throws validation_failed listing every problem; writes nothing. */
 async function planImport(ctx: Ctx, data: unknown, replace: boolean): Promise<Plan> {
   const issues: Issue[] = [];
@@ -380,11 +401,13 @@ async function planImport(ctx: Ctx, data: unknown, replace: boolean): Promise<Pl
   }
 
   // --- media files that are not fetched: R2 must already hold them
-  for (const m of media) {
-    const head = !m.url || new URL(m.url).origin === ctx.origin ? await ctx.bucket.head(r2Key(m.record.id)) : null;
-    if (head) {
+  const local = media.filter((m) => !m.url || new URL(m.url).origin === ctx.origin);
+  const sizes = await r2Sizes(ctx, new Set(local.map((m) => m.record.id)));
+  for (const m of local) {
+    const size = sizes.get(m.record.id);
+    if (size !== undefined) {
       m.inR2 = true; // url-less, or our own file: no need to download it
-      m.record.size = head.size;
+      m.record.size = size;
     } else if (!m.url) {
       push(`media[${m.index}].url`, `url が無く、R2 にも ${r2Key(m.record.id)} がありません`, `url, or a file already uploaded as ${r2Key(m.record.id)}`);
     }

@@ -268,3 +268,60 @@ describe("single", () => {
     await expect(getSingle(admin(), "news")).rejects.toMatchObject({ code: "bad_request" });
   });
 });
+
+describe("参照の存在確認のクエリ数 (D1 のクエリ上限)", () => {
+  /** A ctx whose D1 records every prepared SQL. */
+  function spied() {
+    const ctx = admin();
+    const prepared: string[] = [];
+    const spy = { ...ctx, db: new Proxy(ctx.db, { get(t, p) {
+      const v = Reflect.get(t, p) as unknown;
+      if (p === "prepare") return (sql: string) => { prepared.push(sql); return t.prepare(sql); };
+      return typeof v === "function" ? v.bind(t) : v;
+    } }) } as typeof ctx;
+    return { ctx: spy, prepared };
+  }
+  const id = (prefix: string, i: number) => `${prefix}_${String(i).padStart(12, "0")}`;
+
+  beforeEach(async () => {
+    await createCollection(admin(), { name: "albums", fields: [
+      { name: "photos", type: "image", multiple: true },
+      { name: "related", type: "reference", collection: "news", multiple: true },
+    ] });
+    await env.DB.batch(Array.from({ length: 60 }, (_, i) => env.DB.prepare(
+      "INSERT INTO media (id, filename, mime_type, size, created_at) VALUES (?, 'a.png', 'image/png', 1, 'now')").bind(id("m", i))));
+    const c = await env.DB.prepare("SELECT id FROM collections WHERE name = 'news'").first<{ id: string }>();
+    await env.DB.batch(Array.from({ length: 60 }, (_, i) => env.DB.prepare(
+      "INSERT INTO entries (id, collection_id, status, data, created_at, updated_at) VALUES (?, ?, 'draft', '{}', 'now', 'now')").bind(id("e", i), c!.id)));
+  });
+
+  it("画像 60 件・参照 60 件のエントリを作っても、存在確認は media 1 回・entries 1 回", async () => {
+    const { ctx, prepared } = spied();
+    const photos = Array.from({ length: 60 }, (_, i) => id("m", i));
+    const related = Array.from({ length: 60 }, (_, i) => id("e", i));
+    const e = await createEntry(ctx, "albums", { data: { photos, related } });
+    expect(e.data.photos).toHaveLength(60);
+    expect(prepared.filter((s) => /FROM media/i.test(s))).toHaveLength(1);
+    expect(prepared.filter((s) => /FROM entries e JOIN collections/i.test(s))).toHaveLength(1);
+    expect(prepared.length).toBeLessThanOrEqual(8);
+  });
+
+  it("まとめて調べても、無い・ゴミ箱・別コレクションの参照はそれぞれの path で報告する", async () => {
+    await env.DB.prepare("UPDATE media SET deleted_at = 'now' WHERE id = ?").bind(id("m", 1)).run();
+    await env.DB.prepare("UPDATE entries SET deleted_at = 'now' WHERE id = ?").bind(id("e", 1)).run();
+    const other = await createEntry(admin(), "albums", { data: {} });
+    const { ctx, prepared } = spied();
+    const err = await createEntry(ctx, "albums", { data: {
+      photos: [id("m", 0), id("m", 1), "m_zzzzzzzzzzzz"], related: [id("e", 0), id("e", 1), other.id, "e_zzzzzzzzzzzz"],
+    } }).then(() => null, (x) => x);
+    expect(err).toMatchObject({ code: "validation_failed" });
+    expect((err as { issues: { path: string; message: string }[] }).issues.map((i) => [i.path, i.message])).toEqual([
+      ["data.photos[1]", "media not found (missing or in trash)"],
+      ["data.photos[2]", "media not found (missing or in trash)"],
+      ["data.related[1]", "referenced entry not found (missing or in trash)"],
+      ["data.related[2]", 'referenced entry belongs to "albums"'],
+      ["data.related[3]", "referenced entry not found (missing or in trash)"],
+    ]);
+    expect(prepared.filter((s) => /FROM media/i.test(s))).toHaveLength(1);
+  });
+});

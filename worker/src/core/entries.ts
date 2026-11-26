@@ -122,23 +122,34 @@ export async function getSingle(ctx: Ctx, collection: string): Promise<EntryReco
   return readEntry(ctx, collection, null);
 }
 
-/** Reports media / referenced entries that do not exist (or are trashed, or live in the wrong collection). */
+/**
+ * Reports media / referenced entries that do not exist (or are trashed, or live in the wrong collection).
+ * At most two queries however many refs there are (ids travel as one JSON array): D1 caps the queries per request.
+ */
 export async function assertRefs(ctx: Ctx, refs: ValidateResult["refs"], _fields: FieldDef[]): Promise<Issue[]> {
   const issues: Issue[] = [];
   const at = (paths: string[] | undefined, message: string, expected: string, received: string) => {
     for (const path of paths ?? ["data"]) issues.push({ path, message, expected, received });
   };
+  const [liveMedia, owners] = await Promise.all([
+    refs.media.length === 0 ? [] : ctx.db
+      .prepare("SELECT id FROM media WHERE deleted_at IS NULL AND id IN (SELECT value FROM json_each(?))")
+      .bind(JSON.stringify(refs.media)).all<{ id: string }>().then((r) => r.results),
+    refs.entries.length === 0 ? [] : ctx.db
+      .prepare(
+        "SELECT e.id AS id, e.deleted_at AS e_deleted, c.name AS cname, c.deleted_at AS c_deleted " +
+          "FROM entries e JOIN collections c ON c.id = e.collection_id WHERE e.id IN (SELECT value FROM json_each(?))",
+      )
+      .bind(JSON.stringify([...new Set(refs.entries.map((r) => r.id))]))
+      .all<{ id: string; e_deleted: string | null; cname: string; c_deleted: string | null }>().then((r) => r.results),
+  ]);
+  const media = new Set(liveMedia.map((r) => r.id));
+  const entries = new Map(owners.map((r) => [r.id, r]));
   for (const id of refs.media) {
-    const found = await ctx.db.prepare("SELECT 1 AS x FROM media WHERE id = ? AND deleted_at IS NULL").bind(id).first();
-    if (!found) at(refs.paths.media[id], "media not found (missing or in trash)", "existing media id", id);
+    if (!media.has(id)) at(refs.paths.media[id], "media not found (missing or in trash)", "existing media id", id);
   }
   for (const ref of refs.entries) {
-    const row = await ctx.db
-      .prepare(
-        "SELECT e.deleted_at AS e_deleted, c.name AS cname, c.deleted_at AS c_deleted " +
-          "FROM entries e JOIN collections c ON c.id = e.collection_id WHERE e.id = ?",
-      )
-      .bind(ref.id).first<{ e_deleted: string | null; cname: string; c_deleted: string | null }>();
+    const row = entries.get(ref.id);
     const paths = refs.paths.entries[`${ref.collection}/${ref.id}`];
     const expected = `existing entry id in "${ref.collection}"`;
     if (!row || row.e_deleted || row.c_deleted) at(paths, "referenced entry not found (missing or in trash)", expected, ref.id);

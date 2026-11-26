@@ -1,6 +1,6 @@
 import { env } from "cloudflare:test";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createCollection } from "../src/core/collections";
+import { createCollection, updateCollection } from "../src/core/collections";
 import { createCtx, getSetting } from "../src/core/context";
 import { createEntry, getEntryRecord } from "../src/core/entries";
 import { uploadMedia } from "../src/core/media";
@@ -70,6 +70,27 @@ describe("exportData", () => {
     });
     expect(dump.media).toEqual([{ ...media, url: `https://cms.test/media/${media.id}/cover.png` }]);
     expect(JSON.stringify(dump)).not.toMatch(/preview_secret|content_version|api_keys|hash/);
+  });
+  it("スキーマから消えたフィールドの値（古いキー）は出さず、そのまま取り込める（list の中も同様）", async () => {
+    await createCollection(admin(), {
+      name: "page",
+      fields: [
+        { name: "title", type: "text" }, { name: "old", type: "text" },
+        { name: "items", type: "list", fields: [{ name: "a", type: "text" }, { name: "b", type: "text" }] },
+      ],
+    });
+    const e = await createEntry(admin(), "page", { data: { title: "t", old: "x", items: [{ a: "1", b: "2" }] } });
+    await updateCollection(admin(), "page", {
+      fields: [{ name: "title", type: "text" }, { name: "items", type: "list", fields: [{ name: "a", type: "text" }] }],
+    });
+    const stored = await env.DB.prepare("SELECT data FROM entries WHERE id = ?").bind(e.id).first<{ data: string }>();
+    expect(JSON.parse(stored!.data)).toMatchObject({ old: "x" }); // R1: still stored
+    const dump = await exportData(admin());
+    expect(dump.entries[0].data).toEqual({ title: "t", items: [{ a: "1" }] });
+    await resetSite(admin(), "dev-site");
+    await emptyTrash(admin(), "dev-site");
+    await importData(admin(), { data: dump, mode: "merge" });
+    expect((await getEntryRecord(admin(), "page", e.id)).data).toEqual({ title: "t", items: [{ a: "1" }] });
   });
   it("admin 以外は不可", async () => {
     await expect(exportData(reader())).rejects.toMatchObject({ code: "forbidden" });

@@ -37,7 +37,20 @@ const join = (prefix: string, path: string) =>
 // export
 // ---------------------------------------------------------------------------------------------
 
-/** Everything except the trash, `settings` and `api_keys`. Entry data is the stored value (media / references stay ids). */
+/** Drops keys the schema no longer defines (stale keys kept by R1), also inside `list` items, so the export imports strictly. */
+function stripStale(fields: FieldDef[], data: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const f of fields) {
+    if (!Object.hasOwn(data, f.name)) continue;
+    const v = data[f.name];
+    out[f.name] = f.type === "list" && f.fields && Array.isArray(v)
+      ? v.map((item) => (isObject(item) ? stripStale(f.fields!, item) : item))
+      : v;
+  }
+  return out;
+}
+
+/** Everything except the trash, `settings` and `api_keys`. Entry data is the stored value minus stale keys (media / references stay ids). */
 export async function exportData(ctx: Ctx): Promise<ExportData> {
   requireRole(ctx, "admin");
   const [collections, entries, media] = await ctx.db.batch([
@@ -49,6 +62,7 @@ export async function exportData(ctx: Ctx): Promise<ExportData> {
     ctx.db.prepare("SELECT * FROM media WHERE deleted_at IS NULL ORDER BY created_at, id"),
   ]);
   type Row = Record<string, string | number | null>;
+  const schemas = new Map((collections.results as Row[]).map((r) => [r.name as string, JSON.parse(r.fields as string) as FieldDef[]]));
   return {
     format: FORMAT, version: 1, exportedAt: ctx.now().toISOString(), site: ctx.siteName,
     collections: (collections.results as Row[]).map((r): CollectionInput => ({
@@ -59,7 +73,7 @@ export async function exportData(ctx: Ctx): Promise<ExportData> {
     })),
     entries: (entries.results as Row[]).map((r) => ({
       id: r.id as string, collection: r.cname as string, slug: r.slug as string | null, status: r.status as Status,
-      data: JSON.parse(r.data as string) as Record<string, unknown>,
+      data: stripStale(schemas.get(r.cname as string) ?? [], JSON.parse(r.data as string) as Record<string, unknown>),
       createdAt: r.created_at as string, updatedAt: r.updated_at as string, publishedAt: r.published_at as string | null,
     })),
     media: (media.results as Row[]).map((r) => {

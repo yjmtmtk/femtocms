@@ -486,3 +486,269 @@ it("more: 全件が1ページに収まればボタンを出さない。取得失
   expect(btn.hasAttribute("disabled")).toBe(false);
   expect(titles().length).toBe(5);
 });
+
+// ---- テンプレート: <template> で見た目を自由に決める ----
+
+const q = (sel: string) => document.querySelector(sel) as any;
+const qa = (sel: string) => [...document.querySelectorAll(sel)] as any[];
+
+it("テンプレート: 一覧を記事ごとに複製して div.fcms-items に入れ、値は文字として入れる", async () => {
+  setPageUrl("https://lp.test/");
+  document.body.innerHTML = `<div data-femtocms="news" data-href="/ignored/{slug}"><template>
+    <article class="card"><h3 data-field="title"></h3><span class="price" data-field="price"></span></article>
+  </template></div>`;
+  mockItems([entry({ data: { title: "<b>x</b>", price: 580 } }), entry({ id: "e_000000000002", data: { title: "B", price: 0 } })]);
+  load();
+  await win.femtocms.refresh();
+  expect(q("ul.fcms-list")).toBeNull();
+  const cards = qa("div.fcms-items > article.card");
+  expect(cards.length).toBe(2);
+  expect(cards[0].querySelector("h3").textContent).toBe("<b>x</b>");
+  expect(cards[0].querySelector("h3").innerHTML).not.toContain("<b>");
+  expect(cards[1].querySelector(".price").textContent).toBe("0");
+  expect(q("a")).toBeNull();
+  expect(q("template")).toBeNull();
+});
+
+it("テンプレート: 中身が <li> なら ul.fcms-items で包む", async () => {
+  setPageUrl("https://lp.test/");
+  document.body.innerHTML = `<div data-femtocms="news"><template><li data-field="title"></li></template></div>`;
+  mockItems([entry()]);
+  load();
+  await win.femtocms.refresh();
+  expect(q("ul.fcms-items > li").textContent).toBe("Hello");
+});
+
+it("テンプレート: img には src・alt・幅高さ・lazy を入れ、値が無い・危険な URL の img は消す", async () => {
+  setPageUrl("https://lp.test/");
+  document.body.innerHTML = `<div data-femtocms="news"><template>
+    <div class="c"><img class="thumb" data-field="cover"><img class="keep" data-field="cover" alt="固定" loading="eager"></div>
+  </template></div>`;
+  mockItems([
+    entry({ data: { title: "A", cover: { url: "https://cms.test/media/m_1/a.png", alt: "ラテ", width: 800, height: 600 } } }),
+    entry({ id: "e_000000000002", data: { title: "B" } }),
+    entry({ id: "e_000000000003", data: { title: "C", cover: { url: "javascript:alert(1)", alt: "" } } }),
+  ]);
+  load();
+  await win.femtocms.refresh();
+  const cards = qa(".c");
+  const img = cards[0].querySelector("img.thumb");
+  expect(img.getAttribute("src")).toBe("https://cms.test/media/m_1/a.png");
+  expect(img.getAttribute("alt")).toBe("ラテ");
+  expect(img.getAttribute("width")).toBe("800");
+  expect(img.getAttribute("height")).toBe("600");
+  expect(img.getAttribute("loading")).toBe("lazy");
+  const keep = cards[0].querySelector("img.keep");
+  expect(keep.getAttribute("alt")).toBe("固定");
+  expect(keep.getAttribute("loading")).toBe("eager");
+  expect(cards[1].querySelector("img")).toBeNull();
+  expect(cards[2].querySelector("img")).toBeNull();
+});
+
+it("テンプレート: <time> には datetime 属性と読みやすい日付を入れる（data 内の日時も）", async () => {
+  setPageUrl("https://lp.test/");
+  document.body.innerHTML = `<div data-femtocms="news" data-locale="en-US"><template>
+    <p><time class="pub" data-field="publishedAt"></time><time class="ev" data-field="eventAt"></time><span class="raw" data-field="publishedAt"></span></p>
+  </template></div>`;
+  mockItems([entry({ data: { title: "A", eventAt: "2026-12-24T09:00:00.000Z" } })]);
+  load();
+  await win.femtocms.refresh();
+  expect(q("time.pub").getAttribute("datetime")).toBe("2026-11-26T00:00:00.000Z");
+  expect(q("time.pub").textContent).toBe(new Date("2026-11-26T00:00:00.000Z").toLocaleDateString("en-US"));
+  expect(q("time.ev").getAttribute("datetime")).toBe("2026-12-24T09:00:00.000Z");
+  expect(q("time.ev").textContent).toBe(new Date("2026-12-24T09:00:00.000Z").toLocaleDateString("en-US"));
+  expect(q(".raw").textContent).toBe("2026-11-26T00:00:00.000Z");
+});
+
+it("テンプレート: Markdown 項目はサーバーで変換済みの HTML を入れ、複数選択は「, 」でつなぐ", async () => {
+  setPageUrl("https://lp.test/");
+  document.body.innerHTML = `<div data-femtocms="news"><template>
+    <div class="c"><div class="body" data-field="body"></div><span class="tags" data-field="tags"></span><span class="obj" data-field="meta"></span><span class="flag" data-field="soldOut">x</span></div>
+  </template></div>`;
+  mockItems([entry({ data: { title: "A", body: "**md**", tags: ["menu", "event"], meta: { a: 1 }, soldOut: true }, html: { body: "<p><strong>md</strong></p>" } })]);
+  load();
+  await win.femtocms.refresh();
+  expect(q(".body").innerHTML).toBe("<p><strong>md</strong></p>");
+  expect(q(".tags").textContent).toBe("menu, event");
+  expect(q(".obj").textContent).toBe("");
+  expect(q(".flag").textContent).toBe("");
+});
+
+it("テンプレート: data-if は空・false・null・[] で要素ごと消し、0 は残す。! で反転する", async () => {
+  setPageUrl("https://lp.test/");
+  document.body.innerHTML = `<div data-femtocms="news"><template>
+    <div class="c"><b class="sold" data-if="soldOut">売り切れ</b><b class="open" data-if="!soldOut">販売中</b>
+    <i class="price" data-if="price">p</i><i class="note" data-if="note">n</i><i class="tags" data-if="tags">t</i></div>
+  </template></div>`;
+  mockItems([
+    entry({ data: { title: "A", soldOut: true, price: 0, note: "", tags: [] } }),
+    entry({ id: "e_000000000002", data: { title: "B", soldOut: false, note: "あり", tags: ["x"] } }),
+  ]);
+  load();
+  await win.femtocms.refresh();
+  const [a, b] = qa(".c");
+  expect(a.querySelector(".sold")).not.toBeNull();
+  expect(a.querySelector(".open")).toBeNull();
+  expect(a.querySelector(".price")).not.toBeNull();
+  expect(a.querySelector(".note")).toBeNull();
+  expect(a.querySelector(".tags")).toBeNull();
+  expect(b.querySelector(".sold")).toBeNull();
+  expect(b.querySelector(".open")).not.toBeNull();
+  expect(b.querySelector(".price")).toBeNull();
+  expect(b.querySelector(".note")).not.toBeNull();
+  expect(b.querySelector(".tags")).not.toBeNull();
+});
+
+it("テンプレート: data-class は「項目名-値」を付け、true なら項目名、記号は取り除く", async () => {
+  setPageUrl("https://lp.test/");
+  document.body.innerHTML = `<div data-femtocms="news"><template>
+    <div class="c" data-class="category soldOut tags weird"></div>
+  </template></div>`;
+  mockItems([entry({ data: { title: "A", category: "menu", soldOut: true, tags: ["a", "b c"], weird: "x\"><y" } })]);
+  load();
+  await win.femtocms.refresh();
+  const cls = [...q(".c").classList];
+  expect(cls).toEqual(expect.arrayContaining(["c", "category-menu", "soldOut", "tags-a", "tags-bc", "weird-xy"]));
+  expect(cls.length).toBe(6);
+});
+
+it("テンプレート: data-href は {項目名} を URL エンコードして入れ、危険なリンクは付けない", async () => {
+  setPageUrl("https://lp.test/");
+  document.body.innerHTML = `<div data-femtocms="news"><template>
+    <div class="c"><a class="ok" data-href="news.html?slug={slug}&c={category}&id={id}">x</a><a class="bad" data-href="javascript:{slug}">y</a></div>
+  </template></div>`;
+  mockItems([entry({ slug: "a/b", data: { title: "A", category: "お知らせ" } }), entry({ id: "e_000000000002", slug: null, data: { title: "B" } })]);
+  load();
+  await win.femtocms.refresh();
+  const [a, b] = qa(".c");
+  expect(a.querySelector(".ok").getAttribute("href")).toBe(`news.html?slug=a%2Fb&c=${encodeURIComponent("お知らせ")}&id=e_abc123def456`);
+  expect(a.querySelector(".bad").hasAttribute("href")).toBe(false);
+  expect(b.querySelector(".ok").getAttribute("href")).toBe("news.html?slug=e_000000000002&c=&id=e_000000000002");
+});
+
+it("テンプレート: data-each で list 型を繰り返し、入れ子もでき、中では各要素の項目を読む", async () => {
+  setPageUrl("https://lp.test/");
+  document.body.innerHTML = `<div data-femtocms-entry="pricing" data-slug="pricing"><template>
+    <section><h2 data-field="title"></h2>
+      <template data-each="plans"><div class="plan"><h3 data-field="name"></h3>
+        <ul><template data-each="features"><li data-field="label"></li></template></ul></div></template>
+    </section>
+  </template></div>`;
+  mockEntry(entry({ slug: "pricing", data: { title: "料金", plans: [
+    { name: "ライト", features: [{ label: "A" }, { label: "B" }] },
+    { name: "プロ", features: [{ label: "C" }], title: "内側" },
+  ] } }));
+  load();
+  await win.femtocms.refresh();
+  expect(q("h2").textContent).toBe("料金");
+  const plans = qa(".plan");
+  expect(plans.map((p) => p.querySelector("h3").textContent)).toEqual(["ライト", "プロ"]);
+  expect([...plans[0].querySelectorAll("li")].map((l: any) => l.textContent)).toEqual(["A", "B"]);
+  expect([...plans[1].querySelectorAll("li")].map((l: any) => l.textContent)).toEqual(["C"]);
+  expect(q("template")).toBeNull();
+});
+
+it("テンプレート: data-each の中で data-field=\".\" は要素そのもの（複数画像のギャラリー）", async () => {
+  setPageUrl("https://lp.test/");
+  document.body.innerHTML = `<div data-femtocms-entry="shop" data-slug="s"><template>
+    <div class="g"><template data-each="photos"><img data-field="."></template></div>
+  </template></div>`;
+  mockEntry(entry({ data: { title: "S", photos: [{ url: "https://cms.test/media/m_1/a.png", alt: "1" }, { url: "https://cms.test/media/m_2/b.png", alt: "2" }] } }));
+  load();
+  await win.femtocms.refresh();
+  expect(qa(".g img").map((i) => i.getAttribute("src"))).toEqual(["https://cms.test/media/m_1/a.png", "https://cms.test/media/m_2/b.png"]);
+});
+
+it("テンプレート: author.name のような書き方を見つけたら expand を自動で付け、展開された記事の中身を出す", async () => {
+  setPageUrl("https://lp.test/");
+  document.body.innerHTML = `<div data-femtocms="news"><template>
+    <div class="c"><span class="who" data-field="author.name"></span><img data-field="author.photo">
+      <template data-each="related"><a class="rel" data-href="?slug={slug}" data-field="title"></a></template></div>
+  </template></div>`;
+  const fetchMock = mockItems([entry({ data: {
+    title: "A",
+    author: { id: "e_000000000009", slug: "yamada", data: { name: "山田", photo: { url: "https://cms.test/media/m_9/y.png", alt: "山田" } }, html: {} },
+    related: [{ id: "e_000000000007", slug: "r1", data: { title: "関連1" }, html: {} }],
+  } })]);
+  load();
+  await win.femtocms.refresh();
+  const u = new URL(String((fetchMock.mock.calls.at(-1) as unknown[])[0]));
+  expect(u.searchParams.get("expand")).toBe("author,related");
+  expect(q(".who").textContent).toBe("山田");
+  expect(q(".c img").getAttribute("src")).toBe("https://cms.test/media/m_9/y.png");
+  expect(q(".rel").textContent).toBe("関連1");
+  expect(q(".rel").getAttribute("href")).toBe("?slug=r1");
+});
+
+it("テンプレート: 展開できなかった参照（ID のまま）は空にしてコンソールに警告する", async () => {
+  setPageUrl("https://lp.test/");
+  const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+  document.body.innerHTML = `<div data-femtocms="news"><template><span class="who" data-field="author.name">?</span></template></div>`;
+  mockItems([entry({ data: { title: "A", author: "e_000000000009" } })]);
+  load();
+  await win.femtocms.refresh();
+  expect(q(".who").textContent).toBe("");
+  expect(warn).toHaveBeenCalled();
+});
+
+it("テンプレート: 項目名がプロトタイプの名前でも何も出さない", async () => {
+  setPageUrl("https://lp.test/");
+  document.body.innerHTML = `<div data-femtocms="news"><template><span class="p" data-field="constructor"></span><span class="q" data-field="title.length"></span></template></div>`;
+  mockItems([entry()]);
+  load();
+  await win.femtocms.refresh();
+  expect(q(".p").textContent).toBe("");
+  expect(q(".q").textContent).toBe("");
+});
+
+it("テンプレート: refresh し直してもテンプレートを覚えていて同じ形で描画する", async () => {
+  setPageUrl("https://lp.test/");
+  document.body.innerHTML = `<div data-femtocms="news"><template><p class="t" data-field="title"></p></template></div>`;
+  mockItems([entry()]);
+  load();
+  await win.femtocms.refresh();
+  await win.femtocms.refresh();
+  expect(qa("p.t").length).toBe(1);
+  expect(q("ul.fcms-list")).toBeNull();
+});
+
+it("テンプレート: もっと見るでも同じテンプレートで追加し、expand も渡す", async () => {
+  setPageUrl("https://lp.test/");
+  document.body.innerHTML = `<div data-femtocms="news" data-limit="2" data-pager="more"><template><p class="t"><span data-field="title"></span><span data-field="author.name"></span></p></template></div>`;
+  const fetchMock = mockPaged(5);
+  load();
+  await win.femtocms.refresh();
+  await win.femtocms.more(q("[data-femtocms]"));
+  expect(qa("div.fcms-items > p.t").map((p) => p.textContent)).toEqual(["T0", "T1", "T2", "T3"]);
+  const u = new URL(String((fetchMock.mock.calls.at(-1) as unknown[])[0]));
+  expect(u.searchParams.get("offset")).toBe("2");
+  expect(u.searchParams.get("expand")).toBe("author");
+});
+
+it("テンプレート: 記事ページでも使え、expand と preview を渡し、タブの題名も変えられる", async () => {
+  setPageUrl("https://lp.test/news.html?slug=winter-latte&preview=tok");
+  document.title = "Cafe";
+  document.body.innerHTML = `<div data-femtocms-entry="news" data-document-title><template>
+    <article class="post"><h1 data-field="title"></h1><div class="b" data-field="body"></div><span data-field="author.name"></span></article>
+  </template></div>`;
+  const fetchMock = mockEntry(detail);
+  load();
+  await win.femtocms.refresh();
+  const u = new URL(String((fetchMock.mock.calls.at(-1) as unknown[])[0]));
+  expect(u.pathname).toBe("/api/news/winter-latte");
+  expect(u.searchParams.get("preview")).toBe("tok");
+  expect(u.searchParams.get("expand")).toBe("author");
+  expect(q("article.post h1").textContent).toBe("<i>冬</i>のラテ");
+  expect(q("article.post .b").innerHTML).toBe("<p><strong>md</strong></p>");
+  expect(q("article.fcms-entry")).toBeNull();
+  expect(document.title).toBe("<i>冬</i>のラテ | Cafe");
+});
+
+it("テンプレート: 記事が見つからなければ data-empty を出す", async () => {
+  setPageUrl("https://lp.test/news.html?slug=nope");
+  document.body.innerHTML = `<div data-femtocms-entry="news" data-empty="ありません"><template><h1 data-field="title"></h1></template></div>`;
+  mockEntry({ error: { code: "not_found" } }, 404);
+  load();
+  await win.femtocms.refresh();
+  expect(q(".fcms-empty").textContent).toBe("ありません");
+});

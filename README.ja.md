@@ -221,6 +221,36 @@ MCP のエンドポイントは `https://<サイト>/mcp`（Streamable HTTP、�
 
 下書きは表示されません。下書きを実際のページのデザインで確認したいときは、`femtocms preview`（MCP なら `get_preview_url`）で得たトークンをページの URL に付けます: `news.html?slug=<slug>&preview=<トークン>`。Markdown の HTML は CMS が生成したもので、生の HTML はエスケープされ、危険なリンクは取り除かれています。スクリプトが HTML として差し込むのはこれだけです。本文は JavaScript で描画するので、サーバで描画するページに比べると検索エンジンには拾われにくいことがあります。
 
+### テンプレートで見た目を自分で決める
+
+一覧（`data-femtocms`）にも記事ページ（`data-femtocms-entry`）にも、中に `<template>` を1つ置けます。置くと標準の表示のかわりに、そのテンプレートを記事ごとに複製して描画します。
+
+```html
+<div data-femtocms="news" data-limit="6" data-pager="more">
+  <template>
+    <a class="card" data-href="news.html?slug={slug}">
+      <span class="badge" data-class="category"></span>
+      <time data-field="publishedAt"></time>
+      <img data-field="thumbnail">
+      <h3 data-field="title"></h3>
+      <p data-if="author.name">by <span data-field="author.name"></span></p>
+    </a>
+  </template>
+</div>
+```
+
+| 属性 | 内容 |
+|---|---|
+| `data-field="項目名"` | 値を入れます。文字・数値はテキストとして入れ、複数選択は「, 」でつなぎます。`<img>` には画像の `src`・`alt`・`width`・`height`・`loading="lazy"` を入れます（テンプレートに書いた属性が優先）。値がない画像の `<img>` は取り除きます。`<time>` には `datetime` 属性と読みやすい日付を入れます。Markdown のフィールドは CMS が変換した HTML を入れます。 |
+| `data-if="項目名"` | 値が空・`false`・`null`・空の配列なら要素ごと取り除きます（`0` は残します）。`data-if="!soldOut"` のように `!` を付けると逆になります。 |
+| `data-class="項目名 …"` | 値をクラスとして付けます。`category` が `menu` なら `category-menu`、`true` なら項目名そのもの（`soldOut`）。英数字・`_`・`-` 以外の文字は取り除きます。 |
+| `data-href="…{項目名}…"` | `href` を作ります。`{slug}`（slug がなければ id）・`{id}`・ほかの項目名が使え、値は URL エンコードします。`http(s)` と相対 URL 以外は付けません。 |
+| `<template data-each="項目名">` | `list` 型や複数の画像・参照を1件ずつ繰り返します。中では、その1件の項目を読みます（入れ子もできます）。`data-field="."` はその値そのもの（画像の一覧なら `<img data-field=".">`）。 |
+
+項目名には `id`・`slug`・`status`・`publishedAt`・`createdAt`・`updatedAt` も使えます。`author.name` のように参照フィールドの先を書くと、スクリプトが自動で `expand=author` を付けて取得します。展開できるのは記事の直下にある参照フィールドだけで、`list` の中の参照や2段先は空になり、コンソールに警告が出ます。
+
+テンプレートの中身が `<li>` なら `<ul class="fcms-items">`、それ以外は `<div class="fcms-items">` で包みます。グリッドなどのレイアウトはこの `.fcms-items` に指定します。テンプレートを使うときは、一覧の要素に付けた `data-fields`・`data-href`・`data-heading` は使いません。ページ送り・「もっと見る」・`data-filter`・`data-empty`・`data-document-title` はそのまま使えます。値は常にテキストとして入るので、データに HTML が含まれていてもそのまま表示され、HTML としては解釈されません。
+
 ## キャッシュ
 
 - **workers.dev（既定）:** 公開の読み出しに `Cache-Control: public, max-age=60` と `ETag` を付けます（条件付きリクエストには 304 を返します）。数件程度なら、毎回 D1 を読んでも十分速いからです。

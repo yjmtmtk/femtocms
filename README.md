@@ -221,6 +221,36 @@ and point the list at it with `data-href="news.html?slug={slug}"`. The page read
 
 Drafts are not shown. To check a draft on your real page design, add the token from `femtocms preview` (or the MCP tool `get_preview_url`) to the page URL: `news.html?slug=<slug>&preview=<token>`. Markdown HTML is produced by the CMS with raw HTML escaped and unsafe links removed; it is the only markup the script inserts. The content is rendered by JavaScript, so search engines may not index it as well as server-rendered pages.
 
+### Templates: your own markup
+
+Put one `<template>` inside a list (`data-femtocms`) or an article page (`data-femtocms-entry`). The script then renders a copy of it for each entry instead of its built-in markup.
+
+```html
+<div data-femtocms="news" data-limit="6" data-pager="more">
+  <template>
+    <a class="card" data-href="news.html?slug={slug}">
+      <span class="badge" data-class="category"></span>
+      <time data-field="publishedAt"></time>
+      <img data-field="thumbnail">
+      <h3 data-field="title"></h3>
+      <p data-if="author.name">by <span data-field="author.name"></span></p>
+    </a>
+  </template>
+</div>
+```
+
+| Attribute | Meaning |
+|---|---|
+| `data-field="name"` | Fills in the value. Strings and numbers go in as text; multiple selections are joined with ", ". An `<img>` gets the image's `src`, `alt`, `width`, `height` and `loading="lazy"` (attributes written in the template win), and an `<img>` with no image is removed. A `<time>` gets a `datetime` attribute and a readable date. Markdown fields get the HTML the CMS rendered. |
+| `data-if="name"` | Removes the element when the value is empty, `false`, `null` or an empty array (`0` is kept). `data-if="!soldOut"` inverts it. |
+| `data-class="name …"` | Adds the value as a class: `category-menu` when `category` is `menu`, or just `soldOut` when the value is `true`. Characters other than letters, digits, `_` and `-` are dropped. |
+| `data-href="…{name}…"` | Builds the `href`. `{slug}` (falls back to the id), `{id}` and any field name work; values are URL-encoded. Only `http(s)` and relative URLs are set. |
+| `<template data-each="name">` | Repeats for each item of a `list` field or a multiple image / reference field. Inside, names refer to that item (nesting works). `data-field="."` is the item itself, e.g. `<img data-field=".">` for an image gallery. |
+
+Names can also be `id`, `slug`, `status`, `publishedAt`, `createdAt` and `updatedAt`. Writing through a reference field, like `author.name`, makes the script add `expand=author` automatically. Only reference fields directly on the entry can be expanded; a reference inside a `list`, or two steps away, comes out empty with a console warning.
+
+Copies go into `<ul class="fcms-items">` when the template's content is an `<li>`, otherwise into `<div class="fcms-items">`; put grid or other layout rules on `.fcms-items`. With a template, the element's `data-fields`, `data-href` and `data-heading` are not used; paging, "load more", `data-filter`, `data-empty` and `data-document-title` work as usual. Values always go in as text, so HTML inside your data is shown as-is and never interpreted.
+
 ## Caching
 
 - **workers.dev (default):** public reads get `Cache-Control: public, max-age=60` and an `ETag` (so conditional requests return 304). With only a few entries, reading D1 on every request is fast enough.

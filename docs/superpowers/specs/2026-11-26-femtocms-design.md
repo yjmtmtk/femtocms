@@ -242,6 +242,7 @@ D1 にテーブル `collections`, `entries`, `media`, `api_keys` を作る。ゴ
    公開済みエントリの一覧を、素の HTML（`<ul>` とクラス名）で描画する。見た目は最小限のデフォルト CSS だけにし、クラス名で上書きできるようにする。表示する項目（タイトル・日付など）は data 属性で指定する。
    - クリックしたときのリンク先【判断】: 既定ではリンクしない。`data-href="news.html?slug={slug}"` のように URL の型を書けば、各項目がそのページへリンクする。femtocms が記事ページそのものを配信することはしない。
    - 記事ページ（利用者の決定、2026-11-26 追加）: 利用者のページに `<div data-femtocms-entry="news">` と embed.js を貼ると、URL の `?slug=` の公開記事（タイトル・日付・Markdown 本文）を描画する。ページ URL の `preview` トークンは API に渡し、下書きを実際のデザインで確認できる。
+   - テンプレート（利用者の決定、2026-11-27 追加）: 一覧・記事ページとも、中に `<template>` を置くと標準の表示のかわりに記事ごとに複製して描画する。`data-field`（値を文字として入れる。img・time・Markdown は専用の扱い）、`data-if`、`data-class`、`data-href`、`<template data-each>`（list 型・複数の画像や参照の繰り返し）。`author.name` のように参照の先を書くと `expand` を自動で付ける（記事の直下の参照だけ）。
 2. **自分で取得**: `fetch("https://<worker>/api/news?limit=5")`。README に、そのままコピペで使える例を載せる。
 
 ## 11. 将来の拡張（v2 以降の候補）

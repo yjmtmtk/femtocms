@@ -36,13 +36,17 @@ function baseSchema(f: FieldDef, direction: Direction): JsonSchema {
       return write
         ? { type: "string", pattern: MEDIA_ID_PATTERN, description: "Media id (m_...). An object with an `id` is also accepted." }
         : { anyOf: [ref("ApiMedia"), { type: "null" }] };
-    case "reference":
-      return {
-        type: "string", pattern: ENTRY_ID_PATTERN,
-        description: write
-          ? `Entry id (e_...)${f.collection ? ` in "${f.collection}"` : ""}. An object with an \`id\` is also accepted.`
-          : `Entry id (e_...)${f.collection ? ` in "${f.collection}"` : ""}. With ?expand=<field> the entry object (or null) is returned instead.`,
-      };
+    case "reference": {
+      const target = `Entry id (e_...)${f.collection ? ` in "${f.collection}"` : ""}`;
+      if (write) return { type: "string", pattern: ENTRY_ID_PATTERN, description: `${target}. An object with an \`id\` is also accepted.` };
+      // A `multiple` array drops dangling ids instead of holding nulls (fieldToJsonSchema uses the plain string for its items).
+      return f.multiple === true
+        ? { type: "string", pattern: ENTRY_ID_PATTERN, description: `${target}. Ids of missing or trashed entries are left out. With ?expand=<field> the entry objects are returned instead.` }
+        : {
+          type: ["string", "null"], pattern: ENTRY_ID_PATTERN,
+          description: `${target}, or null when that entry is missing or in the trash. With ?expand=<field> the entry object (or null) is returned instead.`,
+        };
+    }
     case "list":
       return objectSchema(f.fields ?? [], direction);
     case "json":

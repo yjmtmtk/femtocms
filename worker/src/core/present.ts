@@ -35,10 +35,15 @@ const isObject = (v: unknown): v is Record<string, unknown> =>
   typeof v === "object" && v !== null && !Array.isArray(v);
 
 type MediaMap = Map<string, ApiMedia>;
+/** Live entry id (not trashed, collection not trashed) -> its collection name. */
+type OwnerMap = Map<string, string>;
+interface Lookups { media: MediaMap; owners: OwnerMap }
 
-// Only well-formed media ids are looked up; anything else stored in an image field is legacy data and passes through.
+// Only well-formed ids are looked up; anything else stored in an image / reference field is legacy data and passes through.
 const MEDIA_ID_RE = /^m_[0-9a-z]{12}$/;
 const isMediaId = (v: unknown): v is string => typeof v === "string" && MEDIA_ID_RE.test(v);
+const ENTRY_ID_RE = /^e_[0-9a-z]{12}$/;
+const isEntryId = (v: unknown): v is string => typeof v === "string" && ENTRY_ID_RE.test(v);
 
 // Own properties only, so a field named "constructor" or "toString" never picks up Object.prototype.
 const own = (data: Record<string, unknown>, name: string): unknown => (Object.hasOwn(data, name) ? data[name] : undefined);
@@ -55,29 +60,49 @@ function collectMediaIds(fields: FieldDef[], data: Record<string, unknown>, into
   }
 }
 
+// Collects the entry ids held by the reference fields among `fields` (lists included), except the fields named in `skip`.
+function collectEntryIds(fields: FieldDef[], data: Record<string, unknown>, into: Set<string>, skip?: Set<string>): void {
+  for (const f of fields) {
+    if (skip?.has(f.name)) continue;
+    const v = own(data, f.name);
+    if (f.type === "reference") {
+      for (const x of Array.isArray(v) ? v : [v]) if (isEntryId(x)) into.add(x);
+    } else if (f.type === "list" && Array.isArray(v)) {
+      for (const item of v) if (isObject(item)) collectEntryIds(f.fields ?? [], item, into);
+    }
+  }
+}
+
+/** A reference id is shown only while its target is live and in the field's collection (R17). */
+const liveRef = (f: FieldDef, id: string, owners: OwnerMap) => owners.get(id) === f.collection;
+
 // v1: inside lists, images become ApiMedia too, references stay id strings (expand is top-level only) and markdown stays a raw string (no html).
-function shapeData(fields: FieldDef[], data: Record<string, unknown>, media: MediaMap): Record<string, unknown> {
+// Images and references whose target is missing / trashed (or, for references, in another collection) read as null; in a
+// `multiple` array they are removed. Non-id legacy values pass through.
+function shapeData(fields: FieldDef[], data: Record<string, unknown>, lk: Lookups): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const f of fields) {
     if (!Object.hasOwn(data, f.name)) continue;
     const v = data[f.name];
     if (f.type === "image" && f.multiple === true && Array.isArray(v)) {
-      // Missing / trashed elements are removed from the array (not null); non-id legacy values pass through.
-      out[f.name] = v.flatMap((x) => (isMediaId(x) ? (media.get(x) ?? []) : [x]));
-    } else if (f.type === "image" && isMediaId(v)) out[f.name] = media.get(v) ?? null;
+      out[f.name] = v.flatMap((x) => (isMediaId(x) ? (lk.media.get(x) ?? []) : [x]));
+    } else if (f.type === "image" && isMediaId(v)) out[f.name] = lk.media.get(v) ?? null;
+    else if (f.type === "reference" && f.multiple === true && Array.isArray(v)) {
+      out[f.name] = v.filter((x) => !isEntryId(x) || liveRef(f, x, lk.owners));
+    } else if (f.type === "reference" && isEntryId(v)) out[f.name] = liveRef(f, v, lk.owners) ? v : null;
     else if (f.type === "list" && Array.isArray(v)) {
-      out[f.name] = v.map((item) => (isObject(item) ? shapeData(f.fields ?? [], item, media) : item));
+      out[f.name] = v.map((item) => (isObject(item) ? shapeData(f.fields ?? [], item, lk) : item));
     } else out[f.name] = v;
   }
   return out;
 }
 
 function shapeEntry(
-  collection: Collection, r: EntryRecord, media: MediaMap, fieldFilter: Set<string> | undefined,
+  collection: Collection, r: EntryRecord, lk: Lookups, fieldFilter: Set<string> | undefined,
   expanded: Map<string, ApiEntry | null>,
 ): ApiEntry {
   const shown = collection.fields.filter((f) => !fieldFilter || fieldFilter.has(f.name));
-  const data = shapeData(shown, r.data, media);
+  const data = shapeData(shown, r.data, lk);
   const html: Record<string, string> = {};
   for (const f of shown) {
     const v = own(r.data, f.name);
@@ -96,6 +121,21 @@ function shapeEntry(
     id: r.id, slug: r.slug, status: r.status, createdAt: r.createdAt, updatedAt: r.updatedAt, publishedAt: r.publishedAt,
     data, html,
   };
+}
+
+/** One query for every reference target the output shows (none when there is nothing to check). */
+async function loadOwners(ctx: Ctx, ids: Set<string>): Promise<OwnerMap> {
+  const map: OwnerMap = new Map();
+  if (ids.size === 0) return map;
+  const { results } = await ctx.db
+    .prepare(
+      "SELECT e.id AS id, c.name AS cname FROM entries e JOIN collections c ON c.id = e.collection_id " +
+        "WHERE e.deleted_at IS NULL AND c.deleted_at IS NULL AND e.id IN (SELECT value FROM json_each(?))",
+    )
+    .bind(JSON.stringify([...ids]))
+    .all<{ id: string; cname: string }>();
+  for (const r of results) map.set(r.id, r.cname);
+  return map;
 }
 
 async function loadMedia(ctx: Ctx, ids: Set<string>): Promise<MediaMap> {
@@ -152,19 +192,31 @@ export async function presentEntries(
   const fieldFilter = opts.fields ? new Set(opts.fields) : undefined;
   const { refs } = await loadExpanded(ctx, collection, records, opts.expand ?? []);
 
-  // A single media query covers the records and any expanded references.
+  // A single media query and a single reference-existence query cover the records and any expanded references.
+  // Expanded fields are resolved by loadExpanded itself, so their ids need no existence check.
   const mediaIds = new Set<string>();
+  const entryIds = new Set<string>();
   const visibleFields = collection.fields.filter((f) => !fieldFilter || fieldFilter.has(f.name));
-  for (const r of records) collectMediaIds(visibleFields, r.data, mediaIds);
-  for (const ref of refs.values()) if (ref) collectMediaIds(ref.collection.fields, ref.record.data, mediaIds);
-  const media = await loadMedia(ctx, mediaIds);
+  const expandedFields = new Set(
+    collection.fields.filter((f) => f.type === "reference" && f.collection && (opts.expand ?? []).includes(f.name)).map((f) => f.name),
+  );
+  for (const r of records) {
+    collectMediaIds(visibleFields, r.data, mediaIds);
+    collectEntryIds(visibleFields, r.data, entryIds, expandedFields);
+  }
+  for (const ref of refs.values()) {
+    if (!ref) continue;
+    collectMediaIds(ref.collection.fields, ref.record.data, mediaIds);
+    collectEntryIds(ref.collection.fields, ref.record.data, entryIds);
+  }
+  const lk: Lookups = { media: await loadMedia(ctx, mediaIds), owners: await loadOwners(ctx, entryIds) };
 
   // Expanded entries are shaped without further expansion.
   const expanded = new Map<string, ApiEntry | null>();
   for (const [key, ref] of refs) {
-    expanded.set(key, ref ? shapeEntry(ref.collection, ref.record, media, undefined, new Map()) : null);
+    expanded.set(key, ref ? shapeEntry(ref.collection, ref.record, lk, undefined, new Map()) : null);
   }
-  return records.map((r) => shapeEntry(collection, r, media, fieldFilter, expanded));
+  return records.map((r) => shapeEntry(collection, r, lk, fieldFilter, expanded));
 }
 
 export async function presentEntry(

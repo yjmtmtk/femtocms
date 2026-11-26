@@ -53,10 +53,12 @@ describe("fieldToJsonSchema", () => {
     expect(list.items.properties.heading).toEqual({ type: "string" });
     expect(list.items.properties.pic.pattern).toBe("^m_[0-9a-z]{12}$");
   });
-  it("read: 画像は ApiMedia、参照は id 文字列、markdown は文字列", () => {
+  it("read: 画像は ApiMedia、参照は id 文字列（参照先が無ければ null、multiple では除かれる）、markdown は文字列", () => {
     expect(fieldToJsonSchema(f("cover"), "read")).toEqual({ anyOf: [{ $ref: "#/components/schemas/ApiMedia" }, { type: "null" }] });
     expect(fieldToJsonSchema(f("gallery"), "read")).toEqual({ type: "array", items: { $ref: "#/components/schemas/ApiMedia" } });
-    expect(fieldToJsonSchema(f("author"), "read")).toMatchObject({ type: "string" });
+    expect(fieldToJsonSchema(f("author"), "read")).toMatchObject({ type: ["string", "null"], pattern: "^e_[0-9a-z]{12}$" });
+    expect(fieldToJsonSchema(f("author"), "read").description).toMatch(/null/);
+    expect(fieldToJsonSchema(f("related"), "read")).toMatchObject({ type: "array", items: { type: "string", pattern: "^e_[0-9a-z]{12}$" } });
     expect(fieldToJsonSchema(f("body"), "read")).toMatchObject({ type: "string" });
   });
   it("default は write にだけ出る", () => {
@@ -126,7 +128,7 @@ describe("buildOpenApi", () => {
     const s = build().components.schemas;
     expect(Object.keys(s.NewsEntry.properties.html.properties)).toEqual(["body"]);
     expect(s.NewsData.properties.cover.anyOf[0]).toEqual({ $ref: "#/components/schemas/ApiMedia" });
-    expect(s.NewsData.properties.author.type).toBe("string");
+    expect(s.NewsData.properties.author.type).toEqual(["string", "null"]);
   });
 
   it("ハイフン入りの名前は有効なコンポーネント名になる", () => {

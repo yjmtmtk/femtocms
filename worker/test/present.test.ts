@@ -145,16 +145,21 @@ describe("presentEntries", () => {
     await presentEntries(spy, news, [rec({ title: "x" })], {});
     expect(prepared).toHaveLength(0);
   });
-  it("list の中の画像も ApiMedia になり、参照は id のまま", async () => {
+  it("list の中の画像も ApiMedia になり、参照は id のまま（参照先が無ければ null）", async () => {
     await insertMedia("m_aaaaaaaaaaaa");
+    await createCollection(admin(), { name: "news", fields: [{ name: "title", type: "text" }] });
+    const target = await createEntry(admin(), "news", { data: { title: "t" } });
     const c: Collection = { ...news, fields: [{ name: "items", type: "list", fields: [
       { name: "pic", type: "image" }, { name: "ref", type: "reference", collection: "news" }, { name: "t", type: "markdown" } ] }] };
-    const [e] = await presentEntries(admin(), c, [rec({ items: [{ pic: "m_aaaaaaaaaaaa", ref: "e_zzzzzzzzzzzz", t: "# x", gone: 1 }] })], {});
-    const item = (e.data.items as Array<Record<string, unknown>>)[0];
+    const [e] = await presentEntries(admin(), c, [rec({ items: [
+      { pic: "m_aaaaaaaaaaaa", ref: target.id, t: "# x", gone: 1 }, { ref: "e_zzzzzzzzzzzz" },
+    ] })], {});
+    const [item, missing] = e.data.items as Array<Record<string, unknown>>;
     expect(item.pic).toMatchObject({ id: "m_aaaaaaaaaaaa" });
-    expect(item.ref).toBe("e_zzzzzzzzzzzz");
+    expect(item.ref).toBe(target.id);
     expect(item.t).toBe("# x");
     expect(item).not.toHaveProperty("gone");
+    expect(missing.ref).toBeNull();
     expect(e.html).toEqual({});
   });
   it("presentEntry は1件版", async () => {
@@ -200,11 +205,11 @@ describe("参照の展開", () => {
     expect((await presentEntries(reader(), post, [r], { expand: ["author"] }))[0].data.author).toBeNull();
     expect((await presentEntries(admin(), post, [r], { expand: ["author"] }))[0].data.author).toMatchObject({ id: draft.id });
   });
-  it("multiple の参照: 既定は id の配列、expand では読めない要素（下書きなど）を配列から除く", async () => {
+  it("multiple の参照: 既定は id の配列（存在しない要素は除く）、expand では読めない要素（下書きなど）も配列から除く", async () => {
     const multi: Collection = { ...post, fields: [{ name: "authors", type: "reference", collection: "authors", multiple: true }] };
     const draft = await createEntry(admin(), "authors", { data: { name: "下書き" } });
     const r = postRec({ authors: [draft.id, author.id, "e_nonexistent0"] });
-    expect((await presentEntries(pub(), multi, [r], {}))[0].data.authors).toEqual([draft.id, author.id, "e_nonexistent0"]);
+    expect((await presentEntries(pub(), multi, [r], {}))[0].data.authors).toEqual([draft.id, author.id]);
     expect((await presentEntries(pub(), multi, [r], { expand: ["authors"] }))[0].data.authors)
       .toEqual([expect.objectContaining({ id: author.id, data: expect.objectContaining({ name: "山田" }) })]);
     expect((await presentEntries(admin(), multi, [r], { expand: ["authors"] }))[0].data.authors)
@@ -225,6 +230,69 @@ describe("参照の展開", () => {
     const s = await createEntry(admin(), "secret", { data: { name: "x" }, status: "published" });
     expect((await presentEntries(admin(), post, [postRec({ author: s.id })], { expand: ["author"] }))[0].data.author).toBeNull();
   });
+  describe("expand なしでも、参照先が無い・ゴミ箱・ゴミ箱のコレクション・別コレクションなら null（multiple は除く）", () => {
+    let gone: { trashed: string; inTrashedCollection: string; other: string };
+    beforeEach(async () => {
+      const t = await createEntry(admin(), "authors", { data: { name: "捨てた" }, status: "published" });
+      await env.DB.prepare("UPDATE entries SET deleted_at = 'now' WHERE id = ?").bind(t.id).run();
+      await createCollection(admin(), { name: "old", fields: [{ name: "name", type: "text" }] });
+      const o = await createEntry(admin(), "old", { data: { name: "x" }, status: "published" });
+      await env.DB.prepare("UPDATE collections SET deleted_at = 'now' WHERE name = 'old'").run();
+      const s = await createEntry(admin(), "secret", { data: { name: "x" }, status: "published" });
+      gone = { trashed: t.id, inTrashedCollection: o.id, other: s.id };
+    });
+
+    it("単一の参照（トップレベル）", async () => {
+      const out = await presentEntries(pub(), post, [
+        postRec({ author: author.id }), postRec({ author: gone.trashed }), postRec({ author: gone.other }),
+        postRec({ author: "e_nonexistent0" }), postRec({ author: "legacy" }),
+      ], {});
+      expect(out.map((e) => e.data.author)).toEqual([author.id, null, null, null, "legacy"]);
+      // the collection itself being trashed
+      const oldRef: Collection = { ...post, fields: [{ name: "o", type: "reference", collection: "old" }] };
+      expect((await presentEntries(admin(), oldRef, [postRec({ o: gone.inTrashedCollection })], {}))[0].data.o).toBeNull();
+    });
+
+    it("multiple と list の中", async () => {
+      const c: Collection = { ...post, fields: [
+        { name: "many", type: "reference", collection: "authors", multiple: true },
+        { name: "rows", type: "list", fields: [{ name: "who", type: "reference", collection: "authors" }, { name: "all", type: "reference", collection: "authors", multiple: true }] },
+      ] };
+      const [e] = await presentEntries(admin(), c, [postRec({
+        many: [gone.trashed, author.id, gone.other, "e_nonexistent0"],
+        rows: [{ who: gone.trashed, all: [author.id, gone.trashed] }, { who: author.id }],
+      })], {});
+      expect(e.data.many).toEqual([author.id]);
+      expect(e.data.rows).toEqual([{ who: null, all: [author.id] }, { who: author.id }]);
+    });
+
+    it("展開したエントリの中の参照も同じ扱い", async () => {
+      await createCollection(admin(), { name: "people", fields: [
+        { name: "name", type: "text" }, { name: "friend", type: "reference", collection: "authors" },
+      ] });
+      const p = await createEntry(admin(), "people", { data: { name: "p", friend: author.id }, status: "published" });
+      await env.DB.prepare("UPDATE entries SET data = ? WHERE id = ?").bind(JSON.stringify({ name: "p", friend: gone.trashed }), p.id).run();
+      const c = await createCollection(admin(), { name: "notes", fields: [{ name: "by", type: "reference", collection: "people" }] });
+      const [e] = await presentEntries(admin(), c, [rec({ by: p.id }, { collectionId: c.id })], { expand: ["by"] });
+      expect((e.data.by as { data: Record<string, unknown> }).data.friend).toBeNull();
+    });
+
+    it("参照の存在確認は何件あっても entries へのクエリ 1 回", async () => {
+      const ctx = admin();
+      const prepared: string[] = [];
+      const spy = { ...ctx, db: new Proxy(ctx.db, { get(t, p) {
+        const v = Reflect.get(t, p) as unknown;
+        if (p === "prepare") return (sql: string) => { prepared.push(sql); return t.prepare(sql); };
+        return typeof v === "function" ? v.bind(t) : v;
+      } }) } as typeof ctx;
+      const records = Array.from({ length: 30 }, (_, i) => postRec({ author: i % 2 ? author.id : gone.trashed }));
+      const out = await presentEntries(spy, post, records, {});
+      expect(out[0].data.author).toBeNull();
+      expect(out[1].data.author).toBe(author.id);
+      expect(prepared.filter(s => /FROM entries/i.test(s))).toHaveLength(1);
+    });
+  });
+
   it("展開した参照先の画像も解決され、クエリは media 1回・entries 1回", async () => {
     await insertMedia("m_aaaaaaaaaaaa");
     const a2 = await createEntry(admin(), "authors", { data: { name: "b", avatar: "m_aaaaaaaaaaaa" }, status: "published" });

@@ -95,7 +95,7 @@ Every field has `name` (a letter, then letters, digits or underscores; `id`, `sl
 | `datetime` | ISO 8601 date-time | none |
 | `select` | One or several choices | `options`, `multiple` |
 | `image` | A reference to an uploaded media file. Read back as `{ id, url, width, height, alt, mimeType }` | `multiple` |
-| `reference` | A reference to an entry of another collection (read back as its id, or the entry itself with `expand`) | `collection`, `multiple` |
+| `reference` | A reference to an entry of another collection (read back as its id, or the entry itself with `expand`; `null` when the entry is missing or in the trash) | `collection`, `multiple` |
 | `list` | A repeated group of small items (FAQ Q&A, price rows). One level of nesting | `fields` |
 | `json` | Free-form JSON (escape hatch) | none |
 
@@ -113,7 +113,7 @@ An entry has an `id` (`e_...`), an optional `slug`, a `status` (`draft` or `publ
 
 ### Trash
 
-Every delete (entries, media, collections) **moves the item to the trash**. Deleting a collection moves its entries with it. Trashed items disappear from the API, the embed and previews; references to a trashed entry read as `null`, and a trashed image returns 404.
+Every delete (entries, media, collections) **moves the item to the trash**. Deleting a collection moves its entries with it. Trashed items disappear from the API, the embed and previews: an image or reference field whose target is missing or in the trash reads as `null` (a `multiple` field leaves it out of the array), and a trashed image's URL returns 404.
 
 - Restore with `trash restore <id>`; the item comes back as it was (draft or published).
 - `trash empty` and `trash delete <id>` remove things for good (D1 rows and R2 files) and require the **site name** as confirmation. Items stay in the trash until you empty it.

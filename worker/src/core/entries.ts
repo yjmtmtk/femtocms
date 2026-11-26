@@ -220,9 +220,10 @@ export async function updateEntry(ctx: Ctx, collection: string, idOrSlug: string
   if (patchRefs) issues.push(...(await assertRefs(ctx, patchRefs, c.fields)));
   if (issues.length) throw invalid(issues);
 
-  // (b) merged over stored, schema fields only. Raw patch values are merged so absent keys never pick up defaults.
+  // (b) merged over stored, schema fields only. Defaults apply on create only, so a field cleared
+  // earlier (null, R8) stays absent; raw patch values are merged so the patch's own defaults don't leak in.
   const merged = validateData(c.fields, { ...stored, ...patchData }, {
-    enforceRequired: row.status === "published", ignoreUnknown: true,
+    enforceRequired: row.status === "published", ignoreUnknown: true, applyDefaults: false,
   });
   if (merged.issues.length) throw invalid(merged.issues);
 
@@ -235,7 +236,7 @@ export async function publishEntry(ctx: Ctx, collection: string, idOrSlug: strin
   const c = await writableCollection(ctx, collection);
   const row = await requireRow(ctx, c, idOrSlug);
   const stored = storedData(row);
-  const v = validateData(c.fields, stored, { enforceRequired: true, ignoreUnknown: true });
+  const v = validateData(c.fields, stored, { enforceRequired: true, ignoreUnknown: true, applyDefaults: false });
   const issues = [...v.issues, ...(await assertRefs(ctx, v.refs, c.fields))];
   if (issues.length) throw invalid(issues);
   return saveRow(ctx, c, row.id, {
@@ -259,7 +260,7 @@ export async function putSingle(
   if (!row) return createEntry(ctx, collection, { data: input.data, status: input.status });
 
   const status = input.status ?? row.status;
-  const v = validateData(c.fields, input.data, { enforceRequired: status === "published" });
+  const v = validateData(c.fields, input.data, { enforceRequired: status === "published", applyDefaults: false });
   const issues = [...v.issues, ...(await assertRefs(ctx, v.refs, c.fields))];
   if (issues.length) throw invalid(issues);
   return saveRow(ctx, c, row.id, {

@@ -192,6 +192,30 @@ describe("updateEntry (R1, R8)", () => {
   });
 });
 
+describe("default は作成時だけ適用される (R8)", () => {
+  const withDefault = () => updateCollection(admin(), "news", { fields: [
+    { name: "title", type: "text" }, { name: "category", type: "select", options: ["info", "event"], default: "info" }] });
+  it("作成時は default が入り、null で消した後は無関係な更新でも復活しない", async () => {
+    await withDefault();
+    const e = await createEntry(admin(), "news", { data: { title: "a" } });
+    expect(e.data).toEqual({ title: "a", category: "info" });
+    expect((await updateEntry(admin(), "news", e.id, { data: { category: null } })).data).toEqual({ title: "a" });
+    expect((await updateEntry(admin(), "news", e.id, { data: { title: "x" } })).data).toEqual({ title: "x" });
+  });
+  it("publish でも復活しない", async () => {
+    await withDefault();
+    const e = await createEntry(admin(), "news", { data: { title: "a" } });
+    await updateEntry(admin(), "news", e.id, { data: { category: null } });
+    expect((await publishEntry(admin(), "news", e.id)).data).toEqual({ title: "a" });
+  });
+  it("putSingle: 新規作成では default が入り、既存の置換では入らない", async () => {
+    await updateCollection(admin(), "site", { fields: [
+      { name: "catch", type: "text" }, { name: "lang", type: "text", default: "ja" }] });
+    expect((await putSingle(admin(), "site", { data: { catch: "a" } })).data).toEqual({ catch: "a", lang: "ja" });
+    expect((await putSingle(admin(), "site", { data: { catch: "b" } })).data).toEqual({ catch: "b" });
+  });
+});
+
 describe("publish / unpublish", () => {
   it("unpublish は publishedAt を残し、再公開でも変わらない", async () => {
     const e = await createEntry(admin(), "news", { data: { title: "a" } });

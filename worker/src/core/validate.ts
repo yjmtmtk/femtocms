@@ -17,6 +17,9 @@ export interface ValidateResult {
 export interface ValidateOptions {
   enforceRequired: boolean;
   ignoreUnknown?: boolean;
+  // Fill missing fields from FieldDef.default (default true). Off for existing entries so a cleared
+  // (null) field is not resurrected on the next write.
+  applyDefaults?: boolean;
 }
 
 const MEDIA_ID_RE = /^m_[0-9a-z]{12}$/;
@@ -157,7 +160,7 @@ function walkObject(fields: FieldDef[], input: Record<string, unknown>, path: st
   for (const f of fields) {
     const p = `${path}.${f.name}`;
     let v = Object.hasOwn(input, f.name) ? input[f.name] : undefined;
-    if (v === undefined && f.default !== undefined) v = structuredClone(f.default);
+    if (v === undefined && f.default !== undefined && w.opts.applyDefaults !== false) v = structuredClone(f.default);
     // Missing / null / "" / [] all count as "no value" for required. null also means "clear this
     // field" (R8): accepted without an issue and omitted from `data`.
     const empty = v === undefined || v === null || v === "" || (Array.isArray(v) && v.length === 0);

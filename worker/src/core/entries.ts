@@ -171,15 +171,19 @@ function persistable(fields: FieldDef[], normalized: Record<string, unknown>, st
   return { ...kept, ...normalized };
 }
 
-function conflictFrom(e: unknown, collection: string): unknown {
+/** Maps a UNIQUE violation to `conflict`. For slugs it looks up the holder so the hint can say whether it is in the trash. */
+async function conflictFrom(ctx: Ctx, e: unknown, c: Collection, slug: string | null, selfId: string): Promise<unknown> {
   const msg = e instanceof Error ? `${e.message} ${String((e as { cause?: unknown }).cause ?? "")}` : "";
   if (!/UNIQUE constraint failed/i.test(msg)) return e;
-  if (/slug/i.test(msg)) {
-    return new FemtoError("conflict", `slug は既に使われています (コレクション "${collection}")`, {
-      hint: "別の slug を指定してください。ゴミ箱にあるエントリが使っている場合は、先にゴミ箱から削除してください",
-    });
-  }
-  return new FemtoError("conflict", "同じ id のエントリが既に存在します");
+  if (!/slug/i.test(msg)) return new FemtoError("conflict", "同じ id のエントリが既に存在します");
+  const holder = await ctx.db
+    .prepare("SELECT deleted_at FROM entries WHERE collection_id = ? AND slug = ? AND id != ?")
+    .bind(c.id, slug, selfId).first<{ deleted_at: string | null }>();
+  return new FemtoError("conflict", `slug は既に使われています (コレクション "${c.name}")`, {
+    hint: holder?.deleted_at
+      ? "その slug はゴミ箱にあるエントリが使っています。restore_from_trash で戻すか、ゴミ箱を空にする（または完全削除する）か、別の slug を指定してください"
+      : "別の slug を指定してください",
+  });
 }
 
 async function reload(ctx: Ctx, id: string): Promise<EntryRecord> {
@@ -214,7 +218,7 @@ export async function createEntry(
       .bind(id, c.id, slug.value, status, JSON.stringify(v.data), now, now, publishedAt)
       .run();
   } catch (e) {
-    throw conflictFrom(e, c.name);
+    throw await conflictFrom(ctx, e, c, slug.value, id);
   }
   await bumpVersion(ctx);
   return reload(ctx, id);
@@ -229,7 +233,7 @@ async function saveRow(ctx: Ctx, c: Collection, id: string, ch: Change): Promise
       .bind(ch.slug, ch.status, JSON.stringify(ch.data), ch.publishedAt, ctx.now().toISOString(), id)
       .run();
   } catch (e) {
-    throw conflictFrom(e, c.name);
+    throw await conflictFrom(ctx, e, c, ch.slug, id);
   }
   await bumpVersion(ctx);
   return reload(ctx, id);

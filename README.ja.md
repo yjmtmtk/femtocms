@@ -190,8 +190,12 @@ MCP のエンドポイントは `https://<サイト>/mcp`（Streamable HTTP、�
 | `data-href` | リンク先の型。`/news.html?slug={slug}` や `/news?id={id}` のように書きます。指定しなければリンクしません。femtocms は記事ページ自体は配信しません。自分のページに[詳細の埋め込み](#記事ページ)を置いてください。 |
 | `data-locale` | 日付のロケール（既定はページの `<html lang>`）。 |
 | `data-empty` | エントリがないときに表示するメッセージ。 |
+| `data-filter` | 条件に合うエントリだけを出します。例: `category=menu`、`category=event&price[gte]=1000`（演算子は API の `filter` と同じ `eq ne lt lte gt gte contains in`）。 |
+| `data-pager` | `pages`: 一覧の下にページ番号を出し、ページ URL の `?page=N` で切り替えます（1ページあたり `data-limit` 件）。`more`: 「もっと見る」ボタンを出し、押すと次の `data-limit` 件を下に追加します。 |
+| `data-page-param` | `pages` で使う URL パラメータ名（既定 `page`）。1ページにページ送りの一覧を2つ置くときは別の名前にします。 |
+| `data-prev-label`・`data-next-label`・`data-more-label` | ボタンの文言。既定はロケールに合わせて、日本語なら `‹ 前へ`・`次へ ›`・`もっと見る`、それ以外は `‹ Prev`・`Next ›`・`Load more`。 |
 
-スクリプトは `<ul class="fcms-list">` と `<li class="fcms-item">` を描画します。リンクは `.fcms-link`、タイトルは `.fcms-title`、日付は `<time class="fcms-date">`、そのほかのフィールドは `.fcms-field` と `.fcms-field-<フィールド名>`、画像は `.fcms-image`、空メッセージは `.fcms-empty` です。標準の CSS は最小限で `:where()` を使っているので、自分で書いたルールが必ず優先されます。別のホストから読み込むときは、先に `window.FEMTOCMS_BASE = "https://<サイト>"` を設定してください。新しい要素を追加したあとなどは `window.femtocms.refresh()` で再描画できます。
+スクリプトは `<ul class="fcms-list">` と `<li class="fcms-item">` を描画します。リンクは `.fcms-link`、タイトルは `.fcms-title`、日付は `<time class="fcms-date">`、そのほかのフィールドは `.fcms-field` と `.fcms-field-<フィールド名>`、画像は `.fcms-image`、空メッセージは `.fcms-empty` です。ページ番号は `<nav class="fcms-pager">` の中に `.fcms-pager-prev`・`.fcms-pager-next`・`.fcms-pager-page`・`.fcms-pager-current`（`aria-current="page"`）・`.fcms-pager-gap`（…）、「もっと見る」は `button.fcms-more` です。標準の CSS は最小限で `:where()` を使っているので、自分で書いたルールが必ず優先されます。別のホストから読み込むときは、先に `window.FEMTOCMS_BASE = "https://<サイト>"` を設定してください。新しい要素を追加したあとなどは `window.femtocms.refresh()` で再描画できます。
 
 ### 記事ページ
 

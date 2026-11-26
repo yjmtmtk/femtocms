@@ -337,3 +337,152 @@ it("一覧と詳細が同じページにあっても両方描画する", async (
   expect(document.querySelector("ul.fcms-list")).not.toBeNull();
   expect(document.querySelector("article.fcms-entry")).not.toBeNull();
 });
+
+// ---- ページ送りと絞り込み ----
+
+function mockPaged(total: number) {
+  const fn = vi.fn(async (url: string) => {
+    const u = new URL(String(url));
+    const limit = Number(u.searchParams.get("limit"));
+    const offset = Number(u.searchParams.get("offset") ?? 0);
+    const items = [];
+    for (let i = offset; i < Math.min(total, offset + limit); i++) items.push(entry({ id: `e_${String(i).padStart(12, "0")}`, slug: `s${i}`, data: { title: `T${i}` } }));
+    return Response.json({ items, total, limit, offset });
+  });
+  globalThis.fetch = fn as unknown as typeof fetch;
+  return fn;
+}
+const titles = () => [...document.querySelectorAll(".fcms-title")].map((n: any) => n.textContent);
+
+it("data-filter を filter[...] に変換して API に渡す", async () => {
+  setPageUrl("https://lp.test/");
+  document.body.innerHTML = `<div data-femtocms="news" data-filter="category=menu&price[gte]=1000"></div>`;
+  const fetchMock = mockItems([]);
+  load();
+  await win.femtocms.refresh();
+  const u = new URL(String((fetchMock.mock.calls[0] as unknown[])[0]));
+  expect(u.searchParams.get("filter[category]")).toBe("menu");
+  expect(u.searchParams.get("filter[price][gte]")).toBe("1000");
+});
+
+it("pages: URL の ?page= から offset を決め、ページ番号のナビを出す", async () => {
+  setPageUrl("https://lp.test/news-list.html?page=2&x=1");
+  document.body.innerHTML = `<div data-femtocms="news" data-limit="3" data-pager="pages"></div>`;
+  const fetchMock = mockPaged(11);
+  load();
+  await win.femtocms.refresh();
+  const u = new URL(String((fetchMock.mock.calls[0] as unknown[])[0]));
+  expect(u.searchParams.get("offset")).toBe("3");
+  expect(titles()).toEqual(["T3", "T4", "T5"]);
+  const nav = document.querySelector("nav.fcms-pager")!;
+  expect(nav).not.toBeNull();
+  const current = nav.querySelector("[aria-current=page]")!;
+  expect(current.textContent).toBe("2");
+  const hrefs = [...nav.querySelectorAll("a")].map((a: any) => a.getAttribute("href"));
+  expect(hrefs).toContain("?page=1&x=1"); // 前へ と 1
+  expect(hrefs).toContain("?page=3&x=1"); // 次へ と 3
+  expect(hrefs).toContain("?page=4&x=1");
+  expect(nav.querySelector(".fcms-pager-prev")).not.toBeNull();
+  expect(nav.querySelector(".fcms-pager-next")).not.toBeNull();
+});
+
+it("pages: 1ページ目は「前へ」なし、最後のページは「次へ」なし、1ページしかなければナビなし", async () => {
+  setPageUrl("https://lp.test/list.html");
+  document.body.innerHTML = `<div data-femtocms="news" data-limit="3" data-pager="pages"></div>`;
+  mockPaged(11);
+  load();
+  await win.femtocms.refresh();
+  expect(document.querySelector(".fcms-pager-prev")).toBeNull();
+  expect(document.querySelector(".fcms-pager-next")).not.toBeNull();
+
+  setPageUrl("https://lp.test/list.html?page=4");
+  await win.femtocms.refresh();
+  expect(titles()).toEqual(["T9", "T10"]);
+  expect(document.querySelector(".fcms-pager-next")).toBeNull();
+
+  setPageUrl("https://lp.test/list.html");
+  mockPaged(2);
+  await win.femtocms.refresh();
+  expect(document.querySelector("nav.fcms-pager")).toBeNull();
+});
+
+it("pages: ページ数が多いと前後だけ出して … で省略する。不正な page は 1 として扱う", async () => {
+  setPageUrl("https://lp.test/list.html?page=10");
+  document.body.innerHTML = `<div data-femtocms="news" data-limit="1" data-pager="pages"></div>`;
+  mockPaged(20);
+  load();
+  await win.femtocms.refresh();
+  const labels = [...document.querySelectorAll(".fcms-pager-page, .fcms-pager-gap")].map((n: any) => n.textContent);
+  expect(labels).toEqual(["1", "…", "9", "10", "11", "…", "20"]);
+
+  setPageUrl("https://lp.test/list.html?page=abc");
+  const fetchMock = mockPaged(20);
+  await win.femtocms.refresh();
+  expect(new URL(String((fetchMock.mock.calls[0] as unknown[])[0])).searchParams.get("offset")).toBe("0");
+});
+
+it("pages: data-page-param で URL パラメータ名を変えられ、範囲外のページは data-empty", async () => {
+  setPageUrl("https://lp.test/list.html?p=9");
+  document.body.innerHTML = `<div data-femtocms="news" data-limit="3" data-pager="pages" data-page-param="p" data-empty="ありません"></div>`;
+  mockPaged(5);
+  load();
+  await win.femtocms.refresh();
+  expect(document.querySelector(".fcms-empty")!.textContent).toBe("ありません");
+  const hrefs = [...document.querySelectorAll("nav.fcms-pager a")].map((a: any) => a.getAttribute("href"));
+  expect(hrefs).toContain("?p=1");
+});
+
+it("more: 「もっと見る」で続きを追加し、全部読んだらボタンを消す", async () => {
+  setPageUrl("https://lp.test/");
+  document.documentElement.lang = "ja";
+  document.body.innerHTML = `<div data-femtocms="news" data-limit="4" data-pager="more"></div>`;
+  const fetchMock = mockPaged(10);
+  load();
+  await win.femtocms.refresh();
+  expect(titles()).toEqual(["T0", "T1", "T2", "T3"]);
+  const btn = document.querySelector("button.fcms-more")!;
+  expect(btn.textContent).toBe("もっと見る");
+  expect(btn.getAttribute("type")).toBe("button");
+  await win.femtocms.more(document.querySelector("[data-femtocms]"));
+  expect(titles()).toEqual(["T0", "T1", "T2", "T3", "T4", "T5", "T6", "T7"]);
+  // the script also renders once on load, so look at the latest call
+  expect(new URL(String((fetchMock.mock.calls.at(-1) as unknown[])[0])).searchParams.get("offset")).toBe("4");
+  await win.femtocms.more(document.querySelector("[data-femtocms]"));
+  expect(titles().length).toBe(10);
+  expect(document.querySelector("button.fcms-more")).toBeNull();
+  expect(document.querySelectorAll("ul.fcms-list").length).toBe(1);
+  document.documentElement.lang = "";
+});
+
+it("more: ボタンのクリックで読み込み、data-more-label で文言を変えられる", async () => {
+  setPageUrl("https://lp.test/");
+  document.body.innerHTML = `<div data-femtocms="news" data-limit="2" data-pager="more" data-more-label="Load more news"></div>`;
+  mockPaged(3);
+  load();
+  await win.femtocms.refresh();
+  const btn = document.querySelector("button.fcms-more")!;
+  expect(btn.textContent).toBe("Load more news");
+  btn.click();
+  await vi.waitFor(() => expect(titles()).toEqual(["T0", "T1", "T2"]));
+  expect(document.querySelector("button.fcms-more")).toBeNull();
+});
+
+it("more: 全件が1ページに収まればボタンを出さない。取得失敗でもボタンは残り例外を投げない", async () => {
+  setPageUrl("https://lp.test/");
+  document.body.innerHTML = `<div data-femtocms="news" data-limit="5" data-pager="more"></div>`;
+  mockPaged(3);
+  load();
+  await win.femtocms.refresh();
+  expect(document.querySelector("button.fcms-more")).toBeNull();
+
+  mockPaged(8);
+  await win.femtocms.refresh();
+  expect(document.querySelector("button.fcms-more")).not.toBeNull();
+  globalThis.fetch = vi.fn(async () => { throw new Error("down"); }) as unknown as typeof fetch;
+  vi.spyOn(console, "warn").mockImplementation(() => {});
+  await win.femtocms.more(document.querySelector("[data-femtocms]"));
+  const btn = document.querySelector("button.fcms-more")!;
+  expect(btn).not.toBeNull();
+  expect(btn.hasAttribute("disabled")).toBe(false);
+  expect(titles().length).toBe(5);
+});

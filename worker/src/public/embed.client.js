@@ -15,6 +15,10 @@
     ":where(.fcms-image){display:block;max-width:100%;height:auto}",
     ":where(.fcms-entry) :where(.fcms-title){margin:0 0 .25em}",
     ":where(.fcms-body img){max-width:100%;height:auto}",
+    ":where(.fcms-pager){display:flex;flex-wrap:wrap;gap:.5em;margin-top:1em}",
+    ":where(.fcms-pager a){color:inherit}",
+    ":where(.fcms-pager-current){font-weight:700}",
+    ":where(.fcms-more){margin-top:1em;font:inherit;cursor:pointer}",
   ].join("\n");
   var HEADINGS = { h1: 1, h2: 1, h3: 1, h4: 1, h5: 1, h6: 1 };
 
@@ -43,11 +47,45 @@
     return Math.min(100, Math.max(1, n));
   }
 
-  function buildUrl(collection, limit) {
+  // data-filter="category=menu&price[gte]=1000" → filter[category]=menu & filter[price][gte]=1000
+  function applyFilter(url, raw) {
+    if (!raw) return;
+    raw.split("&").forEach(function (part) {
+      var eq = part.indexOf("=");
+      if (eq < 1) return;
+      var key = part.slice(0, eq).trim();
+      var m = /^([A-Za-z][A-Za-z0-9_]*)(?:\[([a-z]+)\])?$/.exec(key);
+      if (!m) return warn("ignored data-filter part: " + part);
+      url.searchParams.set("filter[" + m[1] + "]" + (m[2] ? "[" + m[2] + "]" : ""), part.slice(eq + 1).trim());
+    });
+  }
+
+  function buildUrl(collection, limit, offset, filter) {
     var url = new URL(base + "/api/" + encodeURIComponent(collection));
     url.searchParams.set("limit", String(limit));
     url.searchParams.set("sort", "-publishedAt");
+    if (offset !== null) url.searchParams.set("offset", String(offset));
+    applyFilter(url, filter);
     return url.toString();
+  }
+
+  function isJapanese(el) {
+    return /^ja/i.test(el.getAttribute("data-locale") || document.documentElement.lang || "");
+  }
+
+  function pageNumber(el) {
+    var n = parseInt(new URLSearchParams(window.location.search).get(el.getAttribute("data-page-param") || "page") || "", 10);
+    return isNaN(n) || n < 1 ? 1 : n;
+  }
+
+  // 1 … 9 10 11 … 20 : first, last, and the current page with its neighbours.
+  function pageWindow(current, pages) {
+    var out = [];
+    for (var p = 1; p <= pages; p++) {
+      if (pages <= 7 || p === 1 || p === pages || Math.abs(p - current) <= 1) out.push(p);
+      else if (out[out.length - 1] !== 0) out.push(0);
+    }
+    return out;
   }
 
   // Only relative URLs and http(s) are linkable; control characters are stripped first because browsers ignore them inside schemes.
@@ -106,13 +144,11 @@
     return null;
   }
 
-  function renderList(el, items) {
+  function appendItems(el, ul, items) {
     var fields = (el.getAttribute("data-fields") || "publishedAt,title")
       .split(",").map(function (s) { return s.trim(); }).filter(Boolean);
     var locale = el.getAttribute("data-locale") || document.documentElement.lang || "";
     var template = el.getAttribute("data-href") || "";
-    var ul = document.createElement("ul");
-    ul.className = "fcms-list";
     items.forEach(function (item) {
       var li = document.createElement("li");
       li.className = "fcms-item";
@@ -131,8 +167,102 @@
       });
       ul.appendChild(li);
     });
+  }
+
+  function renderList(el, items) {
+    var ul = document.createElement("ul");
+    ul.className = "fcms-list";
+    appendItems(el, ul, items);
     el.textContent = "";
     el.appendChild(ul);
+  }
+
+  function pageHref(el, page) {
+    var params = new URLSearchParams(window.location.search);
+    params.set(el.getAttribute("data-page-param") || "page", String(page));
+    return "?" + params.toString();
+  }
+
+  function renderPager(el, current, pages) {
+    var ja = isJapanese(el);
+    var nav = document.createElement("nav");
+    nav.className = "fcms-pager";
+    nav.setAttribute("aria-label", ja ? "ページ" : "Pages");
+    function link(page, label, cls) {
+      var a = document.createElement("a");
+      a.className = cls;
+      a.setAttribute("href", pageHref(el, page));
+      a.textContent = label;
+      nav.appendChild(a);
+    }
+    if (current > 1) link(Math.min(current - 1, pages), el.getAttribute("data-prev-label") || (ja ? "‹ 前へ" : "‹ Prev"), "fcms-pager-prev");
+    pageWindow(current, pages).forEach(function (p) {
+      if (p === 0) {
+        var gap = document.createElement("span");
+        gap.className = "fcms-pager-gap";
+        gap.textContent = "…";
+        nav.appendChild(gap);
+      } else if (p === current) {
+        var cur = document.createElement("span");
+        cur.className = "fcms-pager-page fcms-pager-current";
+        cur.setAttribute("aria-current", "page");
+        cur.textContent = String(p);
+        nav.appendChild(cur);
+      } else {
+        link(p, String(p), "fcms-pager-page");
+      }
+    });
+    if (current < pages) link(current + 1, el.getAttribute("data-next-label") || (ja ? "次へ ›" : "Next ›"), "fcms-pager-next");
+    el.appendChild(nav);
+  }
+
+  // State for data-pager="more": how far each element has loaded.
+  var moreState = new WeakMap();
+
+  function renderMoreButton(el) {
+    var state = moreState.get(el);
+    var old = el.querySelector("button.fcms-more");
+    if (!state || state.offset >= state.total) {
+      if (old) old.parentNode.removeChild(old);
+      return;
+    }
+    if (old) return;
+    var btn = document.createElement("button");
+    btn.className = "fcms-more";
+    btn.setAttribute("type", "button");
+    btn.textContent = el.getAttribute("data-more-label") || (isJapanese(el) ? "もっと見る" : "Load more");
+    btn.addEventListener("click", function () { more(el); });
+    el.appendChild(btn);
+  }
+
+  function more(el) {
+    var state = moreState.get(el);
+    if (!state || state.loading || state.offset >= state.total) return Promise.resolve();
+    state.loading = true;
+    var btn = el.querySelector("button.fcms-more");
+    if (btn) btn.setAttribute("disabled", "");
+    return Promise.resolve()
+      .then(function () { return fetch(buildUrl(state.collection, state.limit, state.offset, state.filter), { credentials: "omit" }); })
+      .then(function (res) {
+        if (!res.ok) throw new Error("HTTP " + res.status + " for " + state.collection);
+        return res.json();
+      })
+      .then(function (body) {
+        if (moreState.get(el) !== state) return;
+        if (!body || !Array.isArray(body.items)) throw new Error("unexpected response for " + state.collection);
+        var ul = el.querySelector("ul.fcms-list");
+        if (ul) appendItems(el, ul, body.items);
+        state.offset += body.items.length;
+        if (typeof body.total === "number") state.total = body.total;
+        if (!body.items.length) state.offset = state.total;
+      })
+      .catch(warn)
+      .then(function () {
+        state.loading = false;
+        var b = el.querySelector("button.fcms-more");
+        if (b) b.removeAttribute("disabled");
+        renderMoreButton(el);
+      });
   }
 
   function renderEmpty(el) {
@@ -232,7 +362,14 @@
     latest.set(el, token);
     var collection = el.getAttribute("data-femtocms");
     if (!collection) return Promise.resolve();
-    return fetch(buildUrl(collection, clampLimit(el.getAttribute("data-limit"))), { credentials: "omit" })
+    moreState.delete(el);
+    var limit = clampLimit(el.getAttribute("data-limit"));
+    var pager = el.getAttribute("data-pager");
+    var filter = el.getAttribute("data-filter") || "";
+    var page = pager === "pages" ? pageNumber(el) : 1;
+    var offset = pager === "pages" || pager === "more" ? (page - 1) * limit : null;
+    return Promise.resolve()
+      .then(function () { return fetch(buildUrl(collection, limit, offset, filter), { credentials: "omit" }); })
       .then(function (res) {
         if (!res.ok) throw new Error("HTTP " + res.status + " for " + collection);
         return res.json();
@@ -243,6 +380,14 @@
         if (latest.get(el) !== token) return;
         if (body.items.length) renderList(el, body.items);
         else renderEmpty(el);
+        var total = typeof body.total === "number" ? body.total : body.items.length;
+        if (pager === "pages") {
+          var pages = Math.ceil(total / limit);
+          if (pages > 1) renderPager(el, page, pages);
+        } else if (pager === "more" && body.items.length) {
+          moreState.set(el, { collection: collection, limit: limit, filter: filter, offset: body.items.length, total: total, loading: false });
+          renderMoreButton(el);
+        }
       })
       .catch(warn);
   }
@@ -262,7 +407,7 @@
     return Promise.all(jobs).then(function () {});
   }
 
-  window.femtocms = { refresh: refresh };
+  window.femtocms = { refresh: refresh, more: more };
 
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", function () { refresh(); });
   else refresh();

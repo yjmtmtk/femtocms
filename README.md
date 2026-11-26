@@ -190,8 +190,12 @@ The MCP endpoint is `https://<your-site>/mcp` (Streamable HTTP, stateless) and n
 | `data-href` | Link template such as `/news.html?slug={slug}` or `/news?id={id}`. Without it, items are not links. femtocms does not serve article pages itself; use the [article embed](#article-page) on your own page. |
 | `data-locale` | Locale for dates (default: the page's `<html lang>`). |
 | `data-empty` | Message shown when there are no entries. |
+| `data-filter` | Only entries that match, e.g. `category=menu` or `category=event&price[gte]=1000` (same operators as the API's `filter`: `eq ne lt lte gt gte contains in`). |
+| `data-pager` | `pages`: page links under the list, driven by `?page=N` in the page URL (`data-limit` entries per page). `more`: a "Load more" button that appends the next `data-limit` entries. |
+| `data-page-param` | URL parameter for `pages` (default `page`). Use different names when a page has two paged lists. |
+| `data-prev-label`, `data-next-label`, `data-more-label` | Button texts (defaults follow the locale: `‹ 前へ` / `次へ ›` / `もっと見る` for Japanese, `‹ Prev` / `Next ›` / `Load more` otherwise). |
 
-The script renders `<ul class="fcms-list">` with `<li class="fcms-item">`; links are `.fcms-link`, the title is `.fcms-title`, dates are `<time class="fcms-date">`, other fields are `.fcms-field` plus `.fcms-field-<name>`, images are `.fcms-image`, and the empty message is `.fcms-empty`. The built-in CSS is minimal and uses `:where()`, so any rule you write wins. When the script is loaded from another host, set `window.FEMTOCMS_BASE = "https://<your-site>"` first. Call `window.femtocms.refresh()` to render again, for example after inserting new elements.
+The script renders `<ul class="fcms-list">` with `<li class="fcms-item">`; links are `.fcms-link`, the title is `.fcms-title`, dates are `<time class="fcms-date">`, other fields are `.fcms-field` plus `.fcms-field-<name>`, images are `.fcms-image`, and the empty message is `.fcms-empty`. Page links are `<nav class="fcms-pager">` with `.fcms-pager-prev`, `.fcms-pager-next`, `.fcms-pager-page`, `.fcms-pager-current` (`aria-current="page"`) and `.fcms-pager-gap` (…); the load-more button is `button.fcms-more`. The built-in CSS is minimal and uses `:where()`, so any rule you write wins. When the script is loaded from another host, set `window.FEMTOCMS_BASE = "https://<your-site>"` first. Call `window.femtocms.refresh()` to render again, for example after inserting new elements.
 
 ### Article page
 

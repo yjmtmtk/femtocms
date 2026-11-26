@@ -14,4 +14,8 @@ declare global {
 
 beforeEach(async () => {
   await applyD1Migrations(env.DB, env.TEST_MIGRATIONS);
+  // Storage is not isolated per test, so start every test from empty tables (entries before collections: FK).
+  await env.DB.batch(
+    ["entries", "media", "api_keys", "settings", "collections"].map((t) => env.DB.prepare(`DELETE FROM ${t}`)),
+  );
 });

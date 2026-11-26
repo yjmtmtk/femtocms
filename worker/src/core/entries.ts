@@ -2,6 +2,7 @@ import { getCollectionRow } from "./collections";
 import { bumpVersion, requireRole, type Ctx } from "./context";
 import { FemtoError, type Issue } from "./errors";
 import { newId, SLUG_RE } from "./ids";
+import { buildListQuery, type ListParams } from "./query";
 import type { Collection, EntryRecord, FieldDef, Status } from "./types";
 import { validateData, type ValidateResult } from "./validate";
 
@@ -77,6 +78,27 @@ async function readEntry(ctx: Ctx, name: string, idOrSlug: string | null, opts?:
 
 export function getEntryRecord(ctx: Ctx, collection: string, idOrSlug: string, opts?: { allowDraft?: boolean }): Promise<EntryRecord> {
   return readEntry(ctx, collection, idOrSlug, opts);
+}
+
+export interface ListResult { items: EntryRecord[]; total: number; limit: number; offset: number }
+
+/** Lists entries with the same visibility rules as single reads. Returns full records (field selection is a presentation concern). */
+export async function listEntryRecords(ctx: Ctx, collection: string, params: ListParams): Promise<ListResult> {
+  const c = await getCollectionRow(ctx, collection);
+  if (ctx.role === "public" && !c.public) {
+    throw new FemtoError("not_found", `コレクション "${collection}" が見つかりません`, { hint: "list_collections で一覧を確認してください" });
+  }
+  const q = buildListQuery(c, params, ctx.role);
+  const [page, count] = await ctx.db.batch([
+    ctx.db.prepare(q.sql).bind(...q.binds),
+    ctx.db.prepare(q.countSql).bind(...q.binds),
+  ]);
+  return {
+    items: (page.results as EntryRow[]).map(toRecord),
+    total: (count.results[0] as { n: number }).n,
+    limit: q.limit,
+    offset: q.offset,
+  };
 }
 
 export async function getSingle(ctx: Ctx, collection: string): Promise<EntryRecord> {

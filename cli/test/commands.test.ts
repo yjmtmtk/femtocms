@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FemtoClient } from "../src/client";
 import {
-  collectionsCreate, collectionsDelete, collectionsUpdate, entriesCreate, entriesDelete, entriesList, entriesPublish,
+  collectionsCreate, collectionsDelete, collectionsUpdate, entriesCreate, entriesDelete, entriesGet, entriesList, entriesPublish,
   entriesUpdate, mediaUpload, previewCmd, trashDelete, trashEmpty, trashRestore,
 } from "../src/commands/content";
 import { exportCmd, importCmd, keysCreate, keysRevoke } from "../src/commands/admin";
@@ -140,10 +140,10 @@ describe("entries create", () => {
   });
 
   it("--publish が無ければ status を送らない。--slug を渡せる", async () => {
-    const r = recorder({ "POST /api/news": entry });
+    const r = recorder({ "GET /api/collections/news": newsCollection, "POST /api/news": entry });
     await entriesCreate(r.client, "news", { data: '{"title":"a"}', slug: "a" });
-    expect(r.calls).toHaveLength(1); // no collection lookup needed for --data only
-    expect(r.calls[0]!.json).toEqual({ data: { title: "a" }, slug: "a" });
+    expect(r.calls.map((c) => c.method)).toEqual(["GET", "POST"]); // the collection kind decides POST vs PUT
+    expect(r.calls[1]!.json).toEqual({ data: { title: "a" }, slug: "a" });
   });
 
   it("--set は型に合わせて変換する", async () => {
@@ -183,7 +183,7 @@ describe("entries create", () => {
   });
 
   it("--data は JSON オブジェクトでなければならない", async () => {
-    const r = recorder({ "POST /api/news": entry });
+    const r = recorder({ "GET /api/collections/news": newsCollection, "POST /api/news": entry });
     await expect(entriesCreate(r.client, "news", { data: "[1]" })).rejects.toThrow("--data");
     await expect(entriesCreate(r.client, "news", { data: "{x" })).rejects.toThrow("--data");
     expect(r.calls).toEqual([]);
@@ -220,6 +220,36 @@ describe("entries create", () => {
     await expect(entriesCreate(r.client, "news", { file: file("a.md", "---\n- a\n- b\n---\nx") })).rejects.toThrow("front matter");
     await expect(entriesCreate(r.client, "news", { file: file("b.md", "---\ntitle: t\nbody") })).rejects.toThrow("front matter");
     expect(writes(r.calls)).toEqual([]);
+  });
+});
+
+describe("single collections", () => {
+  const about = { ...newsCollection, name: "about", kind: "single", fields: [{ name: "title", type: "text" }, { name: "body", type: "markdown" }] };
+
+  it("entries create は single なら PUT /api/<c> に { data, status? } を送る", async () => {
+    const r = recorder({ "GET /api/collections/about": about, "PUT /api/about": entry });
+    await entriesCreate(r.client, "about", { data: '{"title":"私たち"}', set: ["body=hi"], publish: true });
+    const put = r.calls.find((c) => c.method === "PUT")!;
+    expect(put.path).toBe("/api/about");
+    expect(put.json).toEqual({ data: { title: "私たち", body: "hi" }, status: "published" });
+    expect(r.calls.some((c) => c.method === "POST")).toBe(false);
+
+    await entriesCreate(r.client, "about", { data: '{"title":"x"}' });
+    expect(r.calls.filter((c) => c.method === "PUT")[1]!.json).toEqual({ data: { title: "x" } });
+    await expect(entriesCreate(r.client, "about", { data: "{}", slug: "s" })).rejects.toThrow("slug");
+  });
+
+  it("entries get は id 省略で single の GET /api/<c>。list で id 省略はエラー", async () => {
+    const r = recorder({
+      "GET /api/collections/about": about, "GET /api/collections/news": newsCollection,
+      "GET /api/about": { ...entry, id: "e_single" }, "GET /api/news/e1": entry,
+    });
+    expect(await entriesGet(r.client, ["about"])).toMatchObject({ id: "e_single" });
+    expect(r.calls.at(-1)).toMatchObject({ method: "GET", path: "/api/about" });
+    await expect(entriesGet(r.client, ["news"])).rejects.toThrow("id");
+    expect(r.calls.at(-1)!.path).toBe("/api/collections/news"); // no entry request was made
+    await entriesGet(r.client, ["news", "e1"]);
+    expect(r.calls.at(-1)!.path).toBe("/api/news/e1");
   });
 });
 

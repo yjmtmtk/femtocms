@@ -127,7 +127,13 @@ export async function entriesList(client: FemtoClient, collection: string, opts:
   return client.request("GET", `/api/${encodeURIComponent(collection)}`, { query });
 }
 
-export async function entriesGet(client: FemtoClient, [collection, id]: EntryRef): Promise<unknown> {
+/** With no id, a single collection returns its one entry (like MCP get_entry); a list collection needs an id. */
+export async function entriesGet(client: FemtoClient, [collection, id]: [collection: string, id?: string]): Promise<unknown> {
+  if (id === undefined) {
+    const def = await client.request<Collection>("GET", `/api/collections/${encodeURIComponent(collection)}`);
+    if (def.kind !== "single") throw new Error(`コレクション "${collection}" は複数件の list です。エントリの id か slug を指定してください`);
+    return client.request("GET", `/api/${encodeURIComponent(collection)}`);
+  }
   return client.request("GET", entryPath(collection, id));
 }
 
@@ -188,11 +194,15 @@ function parseDataFlag(text: string): Obj {
 }
 
 /** Entry data from --data, then --file (front matter + body), then --set (which wins). Throws before any write. */
-async function buildEntryInput(client: FemtoClient, collection: string, opts: EntryWriteOpts): Promise<{ data: Obj; slug?: string }> {
+async function buildEntryInput(
+  client: FemtoClient, collection: string, opts: EntryWriteOpts, needsSchema: boolean,
+): Promise<{ data: Obj; slug?: string; kind?: Collection["kind"] }> {
   const data: Obj = opts.data === undefined ? {} : parseDataFlag(opts.data);
   const sets = opts.set ?? [];
-  const needsSchema = sets.length > 0 || opts.file !== undefined;
-  const fields = needsSchema ? (await client.request<Collection>("GET", `/api/collections/${encodeURIComponent(collection)}`)).fields : [];
+  const def = needsSchema || sets.length > 0 || opts.file !== undefined
+    ? await client.request<Collection>("GET", `/api/collections/${encodeURIComponent(collection)}`)
+    : undefined;
+  const fields = def?.fields ?? [];
   const names = () => fields.map((f) => f.name).join(", ");
 
   if (opts.file !== undefined) {
@@ -221,18 +231,25 @@ async function buildEntryInput(client: FemtoClient, collection: string, opts: En
     if (!field) throw new Error(`--set のフィールド "${key}" はコレクション "${collection}" にありません。フィールド: ${names()}`);
     data[key] = coerce(field, spec.slice(i + 1));
   }
-  return { data, slug: opts.slug };
+  return { data, slug: opts.slug, kind: def?.kind };
 }
 
 export async function entriesCreate(client: FemtoClient, collection: string, opts: EntryWriteOpts): Promise<unknown> {
-  const { data, slug } = await buildEntryInput(client, collection, opts);
+  // create needs the collection's kind: a single collection is written with PUT (like MCP create_entry).
+  const { data, slug, kind } = await buildEntryInput(client, collection, opts, true);
+  if (kind === "single") {
+    if (slug !== undefined) throw new Error(`コレクション "${collection}" は single のため --slug は使えません`);
+    return client.request("PUT", `/api/${encodeURIComponent(collection)}`, {
+      json: { data, ...(opts.publish && { status: "published" }) },
+    });
+  }
   return client.request("POST", `/api/${encodeURIComponent(collection)}`, {
     json: { data, ...(slug !== undefined && { slug }), ...(opts.publish && { status: "published" }) },
   });
 }
 
 export async function entriesUpdate(client: FemtoClient, [collection, id]: EntryRef, opts: EntryWriteOpts): Promise<unknown> {
-  const { data, slug } = await buildEntryInput(client, collection, opts);
+  const { data, slug } = await buildEntryInput(client, collection, opts, false);
   const changed = Object.keys(data).length > 0 || slug !== undefined;
   if (!changed && !opts.publish) {
     throw new Error("更新する内容がありません（--data / --set / --file / --slug / --publish のいずれかを指定してください）");
@@ -399,9 +416,9 @@ export function registerContent(program: Command): void {
       out(cmd, await entriesList(clientFor(cmd), c, o), humanEntries);
     }));
   entries
-    .command("get <collection> <id>")
-    .description("エントリを 1 件取得（id または slug）")
-    .action(guarded(async (c: string, id: string, _o: object, cmd: Command) => {
+    .command("get <collection> [id]")
+    .description("エントリを 1 件取得（id または slug。single コレクションは id 省略可）")
+    .action(guarded(async (c: string, id: string | undefined, _o: object, cmd: Command) => {
       out(cmd, await entriesGet(clientFor(cmd), [c, id]));
     }));
 

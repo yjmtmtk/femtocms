@@ -89,7 +89,7 @@ femtocms は、管理画面のない CMS です。**自分の Cloudflare アカ�
 |---|---|---|
 | `text` | 1行テキスト | `maxLength` |
 | `textarea` | 複数行のプレーンテキスト | `maxLength` |
-| `markdown` | Markdown 本文。原文と HTML の両方で返る | なし |
+| `markdown` | Markdown 本文。原文と HTML の両方で返る | `maxLength` |
 | `number` | 数値 | `min`, `max`, `integer` |
 | `boolean` | 真偽 | なし |
 | `datetime` | ISO 8601 の日時 | なし |
@@ -117,6 +117,7 @@ femtocms は、管理画面のない CMS です。**自分の Cloudflare アカ�
 
 - `trash restore <id>` で、元の状態（下書き・公開）のまま戻せます。
 - `trash empty` と `trash delete <id>` は本当に消します（D1 の行と R2 のファイル）。確認のため**サイト名**の入力が必要です。ゴミ箱の中身は、空にするまで残ります。
+- サイト名は `init` の `--name` に指定した値です（既定 `femtocms`）。`init` の最後に表示され、`GET /` の `site` でも確認できます。
 - エントリがゴミ箱にある間、その slug は他のエントリに使えません（復元できるようにするためです）。
 
 ## CLI
@@ -125,8 +126,8 @@ femtocms は、管理画面のない CMS です。**自分の Cloudflare アカ�
 
 | コマンド | 内容 |
 |---|---|
-| `init [--name <name>] [--domain <host>] [--cors-origins <a,b>]` | 自分の Cloudflare アカウントに femtocms をデプロイし、接続情報を保存します。`--name`（既定 `femtocms`）は Worker・D1・R2・プロファイルの名前で、同じアカウントに複数のサイトを置けます。`--domain` は独自ドメインの割り当てです（そのドメインが Cloudflare にあること）。`--cors-origins` は API を呼べるブラウザのオリジンを絞ります（[キャッシュ](#キャッシュ)を参照）。 |
-| `upgrade [--cors-origins <a,b>]` | インストールしたパッケージに同梱の Worker をデプロイし、マイグレーションを適用します。 |
+| `init [--name <name>] [--domain <host>] [--cors-origins <a,b>]` | 自分の Cloudflare アカウントに femtocms をデプロイし、接続情報を保存します。`--name`（既定 `femtocms`）は Worker・D1・R2・プロファイルの名前で、同じアカウントに複数のサイトを置けます。`--domain` は独自ドメインの割り当てです（そのドメインが Cloudflare にあること）。`--cors-origins` は API を呼べるブラウザのオリジンを絞ります（[キャッシュ](#キャッシュ)を参照）。もう一度 `init` を実行しても、指定しなかった `--domain` と `--cors-origins` は保存済みの値のままです。 |
+| `upgrade [--cors-origins <a,b>]` | 新しいデータベースのマイグレーションを適用してから、インストールしたパッケージに同梱の Worker をデプロイします。 |
 | `reset [--confirm <サイト名>]` | すべてのコンテンツ（エントリ・メディア・コレクション）をゴミ箱へ移します。API キーは残ります。完全には消えません（消すには `trash empty --confirm <サイト名>`）。 |
 | `destroy` | Worker・D1・R2 を削除します（[アンインストール](#アンインストール)を参照）。 |
 | `login --url <url> --key <key> [--name <profile>]` | 既存のサイトをこのマシンに登録します。 |
@@ -185,7 +186,7 @@ MCP のエンドポイントは `https://<サイト>/mcp`（Streamable HTTP、�
 |---|---|
 | `data-femtocms` | コレクション名（必須）。 |
 | `data-limit` | 件数。1〜100（既定 5）。公開日の新しい順。 |
-| `data-fields` | 表示するフィールドをカンマ区切りで、表示順に指定。既定は `publishedAt,title`。`publishedAt`・`createdAt`・`updatedAt` と、text・number・image のフィールドを使えます。 |
+| `data-fields` | 表示するフィールドをカンマ区切りで、表示順に指定。既定は `publishedAt,title`。`publishedAt`・`createdAt`・`updatedAt` は日付として表示します。データのフィールドは、値が文字列か数値なら（text・textarea・number・datetime・単一の select、Markdown の原文）テキストとして、image なら `<img>` として表示し、それ以外の値（list・複数選択・参照・JSON）は表示しません。 |
 | `data-href` | リンク先の型。`/news/{slug}` や `/news?id={id}` のように書きます。指定しなければリンクしません。femtocms は記事ページ自体は配信しません。 |
 | `data-locale` | 日付のロケール（既定はページの `<html lang>`）。 |
 | `data-empty` | エントリがないときに表示するメッセージ。 |
@@ -218,7 +219,7 @@ npx femtocms import ./backup --replace --confirm <サイト名>   # 既存のデ
 npx femtocms@latest upgrade
 ```
 
-そのバージョンのパッケージに同梱の Worker を自分のアカウントにデプロイし、新しいデータベースのマイグレーションがあれば適用します。
+新しいデータベースのマイグレーションがあれば先に適用し、そのバージョンのパッケージに同梱の Worker を自分のアカウントにデプロイします。
 
 ## アンインストール
 

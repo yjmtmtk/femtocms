@@ -89,7 +89,7 @@ Every field has `name` (a letter, then letters, digits or underscores; `id`, `sl
 |---|---|---|
 | `text` | One line of text | `maxLength` |
 | `textarea` | Plain multi-line text | `maxLength` |
-| `markdown` | Markdown body. Read back as source and as HTML | none |
+| `markdown` | Markdown body. Read back as source and as HTML | `maxLength` |
 | `number` | A number | `min`, `max`, `integer` |
 | `boolean` | true / false | none |
 | `datetime` | ISO 8601 date-time | none |
@@ -117,6 +117,7 @@ Every delete (entries, media, collections) **moves the item to the trash**. Dele
 
 - Restore with `trash restore <id>`; the item comes back as it was (draft or published).
 - `trash empty` and `trash delete <id>` remove things for good (D1 rows and R2 files) and require the **site name** as confirmation. Items stay in the trash until you empty it.
+- The site name is the `--name` you gave `init` (default `femtocms`). `init` prints it, and `GET /` returns it as `site`.
 - While an entry is in the trash its slug stays reserved, so it can be restored.
 
 ## CLI
@@ -125,8 +126,8 @@ Every delete (entries, media, collections) **moves the item to the trash**. Dele
 
 | Command | What it does |
 |---|---|
-| `init [--name <name>] [--domain <host>] [--cors-origins <a,b>]` | Deploys femtocms to your Cloudflare account and saves the connection. `--name` (default `femtocms`) names the Worker, D1 database, R2 bucket and the profile, so one account can hold several sites. `--domain` attaches a custom domain (the domain must be on Cloudflare). `--cors-origins` limits which browser origins may call the API (see [Caching](#caching)). |
-| `upgrade [--cors-origins <a,b>]` | Deploys the Worker bundled with the installed package and applies migrations. |
+| `init [--name <name>] [--domain <host>] [--cors-origins <a,b>]` | Deploys femtocms to your Cloudflare account and saves the connection. `--name` (default `femtocms`) names the Worker, D1 database, R2 bucket and the profile, so one account can hold several sites. `--domain` attaches a custom domain (the domain must be on Cloudflare). `--cors-origins` limits which browser origins may call the API (see [Caching](#caching)). Running `init` again keeps the saved `--domain` and `--cors-origins` unless you pass them. |
+| `upgrade [--cors-origins <a,b>]` | Applies new database migrations, then deploys the Worker bundled with the installed package. |
 | `reset [--confirm <site name>]` | Moves all content (entries, media, collections) to the trash; API keys are kept. Nothing is deleted for good: `trash empty --confirm <site name>` does that. |
 | `destroy` | Deletes the Worker, D1 database and R2 bucket (see [Uninstall](#uninstall)). |
 | `login --url <url> --key <key> [--name <profile>]` | Saves an existing site on this machine. |
@@ -185,7 +186,7 @@ The MCP endpoint is `https://<your-site>/mcp` (Streamable HTTP, stateless) and n
 |---|---|
 | `data-femtocms` | Collection name (required). |
 | `data-limit` | Number of entries, 1 to 100 (default 5). Newest published first. |
-| `data-fields` | Comma-separated fields to show, in order. Default `publishedAt,title`. You can use `publishedAt`, `createdAt`, `updatedAt` and any text, number or image field. |
+| `data-fields` | Comma-separated fields to show, in order. Default `publishedAt,title`. `publishedAt`, `createdAt` and `updatedAt` are shown as dates. A data field is shown as text when its value is a string or a number (text, textarea, number, datetime, a single select, and the Markdown source), and an image field as an `<img>`; other values (lists, multiple selections, references, JSON) are skipped. |
 | `data-href` | Link template such as `/news/{slug}` or `/news?id={id}`. Without it, items are not links. femtocms does not serve article pages itself. |
 | `data-locale` | Locale for dates (default: the page's `<html lang>`). |
 | `data-empty` | Message shown when there are no entries. |
@@ -218,7 +219,7 @@ Entry and media ids are preserved, so references and image URLs keep working in 
 npx femtocms@latest upgrade
 ```
 
-Deploys the Worker bundled with that version of the package to your account and applies any new database migrations.
+Applies any new database migrations, then deploys the Worker bundled with that version of the package to your account.
 
 ## Uninstall
 

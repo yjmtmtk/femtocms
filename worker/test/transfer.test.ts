@@ -5,7 +5,7 @@ import { createCtx, getSetting } from "../src/core/context";
 import { createEntry, getEntryRecord } from "../src/core/entries";
 import { uploadMedia } from "../src/core/media";
 import { exportData, importData, resetSite, type ExportData } from "../src/core/transfer";
-import { emptyTrash, listTrash, restoreFromTrash, trashCollection, trashEntry } from "../src/core/trash";
+import { emptyTrash, listTrash, restoreFromTrash, trashCollection, trashEntry, trashMedia } from "../src/core/trash";
 import { fixtures } from "./fixtures/images";
 
 const admin = () => createCtx(env, "https://cms.test", "admin");
@@ -70,6 +70,60 @@ describe("exportData", () => {
     });
     expect(dump.media).toEqual([{ ...media, url: `https://cms.test/media/${media.id}/cover.png` }]);
     expect(JSON.stringify(dump)).not.toMatch(/preview_secret|content_version|api_keys|hash/);
+  });
+  describe("どんな状態のサイトでも export -> import で戻せる (R11)", () => {
+    const roundTrip = async () => {
+      const dump = await exportData(admin());
+      await resetSite(admin(), "dev-site");
+      await emptyTrash(admin(), "dev-site");
+      mockPng();
+      await importData(admin(), { data: dump, mode: "merge" });
+      return dump;
+    };
+
+    it("ゴミ箱・完全削除されたメディア / エントリを指す値は出さない", async () => {
+      const { media, entry, other } = await seed();
+      await trashMedia(admin(), media.id);
+      const dump = await roundTrip();
+      expect(dump.media).toEqual([]);
+      expect(dump.entries.find((e) => e.id === entry.id)!.data).toEqual({ title: "冬", related: other.id });
+      expect((await getEntryRecord(admin(), "news", entry.id)).data).toEqual({ title: "冬", related: other.id });
+    });
+    it("参照先エントリがゴミ箱にある場合も同様", async () => {
+      const { entry, other } = await seed();
+      await trashEntry(admin(), "news", other.id);
+      const dump = await roundTrip();
+      expect(dump.entries.map((e) => e.id)).toEqual([entry.id]);
+      expect(dump.entries[0].data).toMatchObject({ title: "冬" });
+      expect(dump.entries[0].data).not.toHaveProperty("related");
+    });
+    it("list の中の宙に浮いた参照だけを落とし、他の値は残す", async () => {
+      const media = await uploadMedia(admin(), { bytes: fixtures.png, filename: "a.png" });
+      const gone = await uploadMedia(admin(), { bytes: fixtures.png, filename: "b.png" });
+      await createCollection(admin(), {
+        name: "page", fields: [{ name: "items", type: "list", fields: [{ name: "img", type: "image" }, { name: "t", type: "text" }] }],
+      });
+      await createEntry(admin(), "page", { data: { items: [{ img: media.id, t: "1" }, { img: gone.id, t: "2" }] } });
+      await trashMedia(admin(), gone.id);
+      const dump = await roundTrip();
+      expect(dump.entries[0].data).toEqual({ items: [{ img: media.id, t: "1" }, { t: "2" }] });
+    });
+    it("公開後に required のフィールドを足しても戻せる", async () => {
+      const { entry } = await seed();
+      await updateCollection(admin(), "news", { fields: [...newsDef.fields, { name: "subtitle", type: "text", required: true }] });
+      await roundTrip();
+      const e = await getEntryRecord(admin(), "news", entry.id);
+      expect(e.status).toBe("published");
+      expect(e.data).not.toHaveProperty("subtitle");
+    });
+    it("フィールドの型を変えて保存値が合わなくなっても、その値を除いて戻せる", async () => {
+      await createCollection(admin(), { name: "page", fields: [{ name: "n", type: "text" }, { name: "keep", type: "text" }] });
+      const e = await createEntry(admin(), "page", { data: { n: "abc", keep: "ok" } });
+      await updateCollection(admin(), "page", { fields: [{ name: "n", type: "number" }, { name: "keep", type: "text" }] });
+      const dump = await roundTrip();
+      expect(dump.entries[0].data).toEqual({ keep: "ok" });
+      expect((await getEntryRecord(admin(), "page", e.id)).data).toEqual({ keep: "ok" });
+    });
   });
   it("スキーマから消えたフィールドの値（古いキー）は出さず、そのまま取り込める（list の中も同様）", async () => {
     await createCollection(admin(), {
@@ -176,6 +230,24 @@ describe("importData", () => {
     await env.MEDIA.delete(`media/${media.id}`);
     expect(await issuesOf(importData(admin(), { data: dump, mode: "merge" }))).toEqual(["media[0].url"]);
   });
+  it("url が無い / 自サイトのメディアも、他のアップロードと同じ清掃をし、size は R2 から取る", async () => {
+    const { media } = await seed();
+    const dump = await exportData(admin());
+    Object.assign(dump.media[0], { filename: "a\u2028b\u0001/c.png", mimeType: "not a mime", size: 999999 });
+    delete (dump.media[0] as Partial<typeof dump.media[0]>).url;
+    await importData(admin(), { data: dump, mode: "merge" });
+    expect((await exportData(admin())).media[0]).toMatchObject({
+      id: media.id, filename: "abc.png", mimeType: "image/png", size: fixtures.png.byteLength,
+    });
+    // same-origin url (no fetch) is treated the same way
+    dump.media[0].url = `https://cms.test/media/${media.id}/x.png`;
+    dump.media[0].filename = "d\u0000.jpg";
+    dump.media[0].mimeType = "";
+    const spy = vi.spyOn(globalThis, "fetch");
+    await importData(admin(), { data: dump, mode: "merge" });
+    expect(spy).not.toHaveBeenCalled();
+    expect((await exportData(admin())).media[0]).toMatchObject({ filename: "d.jpg", mimeType: "image/jpeg", size: fixtures.png.byteLength });
+  });
   it("自サイトの url で R2 に実体があれば fetch せずに済ます", async () => {
     await seed();
     const dump = await exportData(admin());
@@ -257,14 +329,14 @@ describe("importData", () => {
       ]));
       expect(await snapshot()).toEqual(before);
     });
-    it("published のときだけ required を強制する", async () => {
+    it("required は取り込みでは強制しない（published でも欠けていてよい）が、型は検証する", async () => {
       const col = { name: "n", fields: [{ name: "title", type: "text", required: true }] };
-      const mk = (status: string) => emptyDump({
+      const mk = (data: unknown) => emptyDump({
         collections: [col] as never,
-        entries: [{ id: "e_aaaaaaaaaaaa", collection: "n", slug: null, status, data: {}, createdAt: "2026-01-01", updatedAt: "2026-01-01", publishedAt: null }] as never,
+        entries: [{ id: "e_aaaaaaaaaaaa", collection: "n", slug: null, status: "published", data, createdAt: "2026-01-01", updatedAt: "2026-01-01", publishedAt: null }] as never,
       });
-      expect(await issuesOf(importData(admin(), { data: mk("published"), mode: "merge" }))).toEqual(["entries[0].data.title"]);
-      await importData(admin(), { data: mk("draft"), mode: "merge" });
+      expect(await issuesOf(importData(admin(), { data: mk({ title: 1 }), mode: "merge" }))).toEqual(["entries[0].data.title"]);
+      await importData(admin(), { data: mk({}), mode: "merge" });
     });
     it("format / version / 配列が無いと validation_failed", async () => {
       const paths = await issuesOf(importData(admin(), { data: { format: "x", version: 2 } as never, mode: "merge" }));

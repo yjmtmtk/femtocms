@@ -44,12 +44,12 @@ export function sanitizeFilename(name: string): string {
 }
 
 /** Lower-cased type without parameters, or null when it is empty, malformed or the generic octet-stream. */
-function normalizeMime(raw: string | null | undefined): string | null {
+export function normalizeMime(raw: string | null | undefined): string | null {
   const m = (raw ?? "").split(";")[0].trim().toLowerCase();
   return MIME_RE.test(m) && m !== GENERIC_MIME ? m : null;
 }
 
-function mimeFromFilename(filename: string): string {
+export function mimeFromFilename(filename: string): string {
   const dot = filename.lastIndexOf(".");
   return (dot >= 0 && EXT_MIME[filename.slice(dot + 1).toLowerCase()]) || GENERIC_MIME;
 }

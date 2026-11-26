@@ -3,7 +3,7 @@ import { referencedCollections } from "./collections";
 import { bumpVersion, requireConfirm, requireRole, type Ctx } from "./context";
 import { FemtoError, type Issue } from "./errors";
 import { newId, SLUG_RE } from "./ids";
-import { fetchRemoteMedia, putMediaObject, r2Key } from "./media";
+import { fetchRemoteMedia, mimeFromFilename, normalizeMime, putMediaObject, r2Key, sanitizeFilename } from "./media";
 import { mediaUrl } from "./present";
 import type { CollectionInput, EntryRecord, FieldDef, MediaRecord, Status } from "./types";
 import { validateData, type ValidateResult } from "./validate";
@@ -37,20 +37,36 @@ const join = (prefix: string, path: string) =>
 // export
 // ---------------------------------------------------------------------------------------------
 
-/** Drops keys the schema no longer defines (stale keys kept by R1), also inside `list` items, so the export imports strictly. */
-function stripStale(fields: FieldDef[], data: Record<string, unknown>): Record<string, unknown> {
+/** What an export may point at: media ids and entry ids (with their collection) that are in the same export. */
+interface Targets { media: Set<string>; entries: Map<string, string> }
+
+/**
+ * Cleans stored entry data so the export imports strictly (R10, R11). Only keys the schema defines survive (stale keys
+ * kept by R1 go), also inside `list` items. A value invalid for its field's current type is dropped, and so is an
+ * image / reference whose target is not part of the export (trashed or deleted: reads show null for it anyway).
+ */
+function exportableData(fields: FieldDef[], data: Record<string, unknown>, targets: Targets): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const f of fields) {
-    if (!Object.hasOwn(data, f.name)) continue;
     const v = data[f.name];
-    out[f.name] = f.type === "list" && f.fields && Array.isArray(v)
-      ? v.map((item) => (isObject(item) ? stripStale(f.fields!, item) : item))
-      : v;
+    if (v === undefined || v === null) continue;
+    if (f.type === "list") {
+      if (Array.isArray(v)) {
+        out[f.name] = v.filter(isObject).map((item) => exportableData(f.fields ?? [], item, targets));
+      }
+      continue;
+    }
+    const r = validateData([f], { [f.name]: v }, { enforceRequired: false, ignoreUnknown: true, applyDefaults: false });
+    if (r.issues.length) continue;
+    const dangling =
+      r.refs.media.some((id) => !targets.media.has(id)) ||
+      r.refs.entries.some((e) => targets.entries.get(e.id) !== e.collection);
+    if (!dangling) out[f.name] = r.data[f.name];
   }
   return out;
 }
 
-/** Everything except the trash, `settings` and `api_keys`. Entry data is the stored value minus stale keys (media / references stay ids). */
+/** Everything except the trash, `settings` and `api_keys`. Entry data is the stored value (media / references stay ids) cleaned by exportableData so it always re-imports. */
 export async function exportData(ctx: Ctx): Promise<ExportData> {
   requireRole(ctx, "admin");
   const [collections, entries, media] = await ctx.db.batch([
@@ -62,6 +78,10 @@ export async function exportData(ctx: Ctx): Promise<ExportData> {
     ctx.db.prepare("SELECT * FROM media WHERE deleted_at IS NULL ORDER BY created_at, id"),
   ]);
   type Row = Record<string, string | number | null>;
+  const targets: Targets = {
+    media: new Set((media.results as Row[]).map((r) => r.id as string)),
+    entries: new Map((entries.results as Row[]).map((r) => [r.id as string, r.cname as string])),
+  };
   const schemas = new Map((collections.results as Row[]).map((r) => [r.name as string, JSON.parse(r.fields as string) as FieldDef[]]));
   return {
     format: FORMAT, version: 1, exportedAt: ctx.now().toISOString(), site: ctx.siteName,
@@ -73,7 +93,7 @@ export async function exportData(ctx: Ctx): Promise<ExportData> {
     })),
     entries: (entries.results as Row[]).map((r) => ({
       id: r.id as string, collection: r.cname as string, slug: r.slug as string | null, status: r.status as Status,
-      data: stripStale(schemas.get(r.cname as string) ?? [], JSON.parse(r.data as string) as Record<string, unknown>),
+      data: exportableData(schemas.get(r.cname as string) ?? [], JSON.parse(r.data as string) as Record<string, unknown>, targets),
       createdAt: r.created_at as string, updatedAt: r.updated_at as string, publishedAt: r.published_at as string | null,
     })),
     media: (media.results as Row[]).map((r) => {
@@ -212,7 +232,6 @@ async function planImport(ctx: Ctx, data: unknown, replace: boolean): Promise<Pl
     else mediaIds.add(raw.id);
     if (typeof raw.filename !== "string" || raw.filename === "") push(`${p}.filename`, "filename が必要です", "string", raw.filename);
     if (typeof raw.mimeType !== "string") push(`${p}.mimeType`, "mimeType が必要です", "string", raw.mimeType);
-    if (!isCount(raw.size)) push(`${p}.size`, "size は 0 以上の整数です", "integer", raw.size);
     for (const k of ["width", "height"] as const) {
       if (raw[k] !== null && raw[k] !== undefined && !isCount(raw[k])) push(`${p}.${k}`, `${k} は 0 以上の整数か null です`, "integer | null", raw[k]);
     }
@@ -227,10 +246,12 @@ async function planImport(ctx: Ctx, data: unknown, replace: boolean): Promise<Pl
       }
     }
     if (issues.length > before) return;
+    // Same clean-up as every upload path. `size` of the export is ignored: it comes from the bytes (fetched) or from R2 (head).
+    const filename = sanitizeFilename(raw.filename as string);
     media.push({
       index: i, url, inR2: false,
       record: {
-        id: raw.id as string, filename: raw.filename as string, mimeType: raw.mimeType as string, size: raw.size as number,
+        id: raw.id as string, filename, mimeType: normalizeMime(raw.mimeType as string) ?? mimeFromFilename(filename), size: 0,
         width: (raw.width as number | null | undefined) ?? null, height: (raw.height as number | null | undefined) ?? null,
         alt: raw.alt as string, createdAt: raw.createdAt as string,
       },
@@ -270,7 +291,7 @@ async function planImport(ctx: Ctx, data: unknown, replace: boolean): Promise<Pl
     }
     let normalized: Record<string, unknown> = {};
     if (c && (status === "draft" || status === "published")) {
-      const v = validateData(c.fields, raw.data, { enforceRequired: status === "published", ignoreUnknown: false, applyDefaults: false });
+      const v = validateData(c.fields, raw.data, { enforceRequired: false, ignoreUnknown: false, applyDefaults: false });
       issues.push(...v.issues.map((x) => ({ ...x, path: join(p, x.path) })));
       normalized = v.data;
       pending.push({ index: i, refs: v.refs });
@@ -344,10 +365,12 @@ async function planImport(ctx: Ctx, data: unknown, replace: boolean): Promise<Pl
 
   // --- media files that are not fetched: R2 must already hold them
   for (const m of media) {
-    if (m.url && new URL(m.url).origin === ctx.origin && await ctx.bucket.head(r2Key(m.record.id))) m.inR2 = true; // our own file: no need to download it
-    else if (!m.url) {
-      if (await ctx.bucket.head(r2Key(m.record.id))) m.inR2 = true;
-      else push(`media[${m.index}].url`, `url が無く、R2 にも ${r2Key(m.record.id)} がありません`, `url, or a file already uploaded as ${r2Key(m.record.id)}`);
+    const head = !m.url || new URL(m.url).origin === ctx.origin ? await ctx.bucket.head(r2Key(m.record.id)) : null;
+    if (head) {
+      m.inR2 = true; // url-less, or our own file: no need to download it
+      m.record.size = head.size;
+    } else if (!m.url) {
+      push(`media[${m.index}].url`, `url が無く、R2 にも ${r2Key(m.record.id)} がありません`, `url, or a file already uploaded as ${r2Key(m.record.id)}`);
     }
   }
 

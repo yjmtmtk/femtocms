@@ -125,8 +125,8 @@ femtocms は、管理画面のない CMS です。**自分の Cloudflare アカ�
 
 | コマンド | 内容 |
 |---|---|
-| `init [--name <name>] [--domain <host>]` | 自分の Cloudflare アカウントに femtocms をデプロイし、接続情報を保存します。`--name`（既定 `femtocms`）は Worker・D1・R2・プロファイルの名前で、同じアカウントに複数のサイトを置けます。`--domain` は独自ドメインの割り当てです（そのドメインが Cloudflare にあること）。 |
-| `upgrade` | インストールしたパッケージに同梱の Worker をデプロイし、マイグレーションを適用します。 |
+| `init [--name <name>] [--domain <host>] [--cors-origins <a,b>]` | 自分の Cloudflare アカウントに femtocms をデプロイし、接続情報を保存します。`--name`（既定 `femtocms`）は Worker・D1・R2・プロファイルの名前で、同じアカウントに複数のサイトを置けます。`--domain` は独自ドメインの割り当てです（そのドメインが Cloudflare にあること）。`--cors-origins` は API を呼べるブラウザのオリジンを絞ります（[キャッシュ](#キャッシュ)を参照）。 |
+| `upgrade [--cors-origins <a,b>]` | インストールしたパッケージに同梱の Worker をデプロイし、マイグレーションを適用します。 |
 | `reset [--confirm <サイト名>]` | すべてのコンテンツ（エントリ・メディア・コレクション）をゴミ箱へ移します。API キーは残ります。完全には消えません（消すには `trash empty --confirm <サイト名>`）。 |
 | `destroy` | Worker・D1・R2 を削除します（[アンインストール](#アンインストール)を参照）。 |
 | `login --url <url> --key <key> [--name <profile>]` | 既存のサイトをこのマシンに登録します。 |
@@ -198,7 +198,7 @@ MCP のエンドポイントは `https://<サイト>/mcp`（Streamable HTTP、�
 - **独自ドメイン（`init --domain`）:** さらに Cloudflare のエッジキャッシュにも保存します。キャッシュのキーに、書き込みのたびに上がる版番号を含めるので、古い内容が出ることはなく、purge も不要です。
 - キー付きのリクエストと `?preview=` 付きのリクエストは `private, no-store` です。
 - メディア（`/media/...`）は `public, max-age=31536000, immutable`、`embed.js` は 5 分キャッシュされます。
-- `/api/*` と `/media/*` は、すべてのオリジンに CORS を許可しています。
+- `/api/*` と `/media/*` の CORS は、既定ですべてのオリジンを許可します。自分のサイトだけに絞るには、`init` か `upgrade` に `--cors-origins https://www.example.com,https://example.com` を渡してください（一覧はプロファイルに保存され、Worker の `CORS_ORIGINS` 変数としてデプロイされます。フラグを付けない `upgrade` は保存済みの一覧を保ち、`--cors-origins ""` で再びすべてのオリジンを許可します）。CORS が制限するのはブラウザだけで、公開コンテンツはブラウザ以外のクライアントからは誰でも読めます。
 
 ## export と import
 

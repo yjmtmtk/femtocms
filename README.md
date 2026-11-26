@@ -125,8 +125,8 @@ Every delete (entries, media, collections) **moves the item to the trash**. Dele
 
 | Command | What it does |
 |---|---|
-| `init [--name <name>] [--domain <host>]` | Deploys femtocms to your Cloudflare account and saves the connection. `--name` (default `femtocms`) names the Worker, D1 database, R2 bucket and the profile, so one account can hold several sites. `--domain` attaches a custom domain (the domain must be on Cloudflare). |
-| `upgrade` | Deploys the Worker bundled with the installed package and applies migrations. |
+| `init [--name <name>] [--domain <host>] [--cors-origins <a,b>]` | Deploys femtocms to your Cloudflare account and saves the connection. `--name` (default `femtocms`) names the Worker, D1 database, R2 bucket and the profile, so one account can hold several sites. `--domain` attaches a custom domain (the domain must be on Cloudflare). `--cors-origins` limits which browser origins may call the API (see [Caching](#caching)). |
+| `upgrade [--cors-origins <a,b>]` | Deploys the Worker bundled with the installed package and applies migrations. |
 | `reset [--confirm <site name>]` | Moves all content (entries, media, collections) to the trash; API keys are kept. Nothing is deleted for good: `trash empty --confirm <site name>` does that. |
 | `destroy` | Deletes the Worker, D1 database and R2 bucket (see [Uninstall](#uninstall)). |
 | `login --url <url> --key <key> [--name <profile>]` | Saves an existing site on this machine. |
@@ -198,7 +198,7 @@ The script renders `<ul class="fcms-list">` with `<li class="fcms-item">`; links
 - **Custom domain (`init --domain`):** responses are additionally stored in the Cloudflare edge cache. The cache key includes a content version that increases with every write, so stale content is never served and no purge is needed.
 - Requests with a key, or with `?preview=`, are `private, no-store`.
 - Media files (`/media/...`) are `public, max-age=31536000, immutable`. `embed.js` is cached for 5 minutes.
-- CORS is open to every origin for `/api/*` and `/media/*`.
+- CORS for `/api/*` and `/media/*` allows every origin by default. To allow only your own sites, pass `--cors-origins https://www.example.com,https://example.com` to `init` or `upgrade` (the list is saved in the profile and deployed as the Worker's `CORS_ORIGINS` variable; `upgrade` without the flag keeps the saved list, and `--cors-origins ""` allows every origin again). CORS only limits browsers: anyone can still read public content with a non-browser client.
 
 ## Export and import
 

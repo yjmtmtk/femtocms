@@ -269,6 +269,36 @@ describe("runInit", () => {
     expect(loadConfig().profiles.femtocms!.site!.d1Id).toBe("db-from-list");
   });
 
+  it("--cors-origins は正規化して site に保存し、wrangler 設定の vars.CORS_ORIGINS に書く", async () => {
+    const r = fakeRunner(happy());
+    await runInit({ name: "femtocms", corsOrigins: " https://a.example , https://b.example:8443/ ", runner: r.run, prompt: fakePrompt().prompt, log: () => {} });
+    expect(loadConfig().profiles.femtocms!.site!.corsOrigins).toBe("https://a.example,https://b.example:8443");
+    const deployCall = r.calls.find((c) => c.args[0] === "deploy")!;
+    expect(deployCall.configAtCall!.vars).toEqual({ SITE_NAME: "femtocms", CORS_ORIGINS: "https://a.example,https://b.example:8443" });
+  });
+
+  it("再度の init は --cors-origins が無ければ保存済みの値を保ち、空文字なら消す（すべてのオリジンを許可）", async () => {
+    seedProfile({ site: { ...SITE, corsOrigins: "https://a.example" } });
+    const r = fakeRunner(happy());
+    await runInit({ name: "femtocms", runner: r.run, prompt: fakePrompt().prompt, log: () => {}, fetch: fakeFetch(200).fn });
+    expect(loadConfig().profiles.femtocms!.site!.corsOrigins).toBe("https://a.example");
+    expect(r.calls.find((c) => c.args[0] === "deploy")!.configAtCall!.vars).toMatchObject({ CORS_ORIGINS: "https://a.example" });
+
+    const r2 = fakeRunner(happy());
+    await runInit({ name: "femtocms", corsOrigins: "", runner: r2.run, prompt: fakePrompt().prompt, log: () => {}, fetch: fakeFetch(200).fn });
+    expect(loadConfig().profiles.femtocms!.site).not.toHaveProperty("corsOrigins");
+    expect(r2.calls.find((c) => c.args[0] === "deploy")!.configAtCall!.vars).toEqual({ SITE_NAME: "femtocms" });
+  });
+
+  it("オリジンとして読めない --cors-origins は wrangler を呼ぶ前に断る", async () => {
+    for (const bad of ["example.com", "ftp://a.example", "https://a.example/path", "https://a.example?x=1", "*"]) {
+      const r = fakeRunner(happy());
+      await expect(runInit({ name: "femtocms", corsOrigins: bad, runner: r.run, prompt: fakePrompt().prompt, log: () => {} }), bad)
+        .rejects.toThrow("--cors-origins");
+      expect(r.calls).toHaveLength(0);
+    }
+  });
+
   it("使えないプロファイル名は wrangler を呼ぶ前に断る", async () => {
     const r = fakeRunner(happy());
     await expect(runInit({ name: "Bad Name", runner: r.run, prompt: fakePrompt().prompt, log: () => {} })).rejects.toThrow(/Bad Name/);
@@ -286,6 +316,24 @@ describe("runUpgrade", () => {
     const migrate = r.calls[1]!.args;
     expect(migrate.slice(0, 5)).toEqual(["d1", "migrations", "apply", "femtocms-femtocms", "--remote"]);
     expect(existsSync(r.calls[0]!.args[2]!)).toBe(true);
+  });
+
+  it("--cors-origins を指定すれば保存して設定に書き、無ければ保存済みの値を使い、空文字なら消す", async () => {
+    seedProfile({ site: { ...SITE, corsOrigins: "https://old.example" } });
+    const replies = { deploy: ok("https://femtocms.me.workers.dev"), "d1 migrations": ok() };
+    const kept = fakeRunner(replies);
+    await runUpgrade({ profile: "femtocms", runner: kept.run, log: () => {} });
+    expect(kept.calls.find((c) => c.args[0] === "deploy")!.configAtCall!.vars).toMatchObject({ CORS_ORIGINS: "https://old.example" });
+
+    const changed = fakeRunner(replies);
+    await runUpgrade({ profile: "femtocms", corsOrigins: "https://new.example", runner: changed.run, log: () => {} });
+    expect(loadConfig().profiles.femtocms!.site!.corsOrigins).toBe("https://new.example");
+    expect(changed.calls.find((c) => c.args[0] === "deploy")!.configAtCall!.vars).toMatchObject({ CORS_ORIGINS: "https://new.example" });
+
+    const cleared = fakeRunner(replies);
+    await runUpgrade({ profile: "femtocms", corsOrigins: "", runner: cleared.run, log: () => {} });
+    expect(loadConfig().profiles.femtocms!.site).not.toHaveProperty("corsOrigins");
+    expect(cleared.calls.find((c) => c.args[0] === "deploy")!.configAtCall!.vars).toEqual({ SITE_NAME: "femtocms" });
   });
 
   it("init で作ったプロファイルでなければ断る", async () => {
@@ -453,6 +501,11 @@ describe("writeSiteConfig", () => {
     expect(cfg.account_id).toBe("acc1");
   });
 
+  it("corsOrigins があれば vars.CORS_ORIGINS を入れる", () => {
+    const cfg = JSON.parse(readFileSync(writeSiteConfig({ ...SITE, corsOrigins: "https://a.example,https://b.example" }, tmp), "utf8"));
+    expect(cfg.vars).toEqual({ SITE_NAME: "femtocms", CORS_ORIGINS: "https://a.example,https://b.example" });
+  });
+
   it("domain があれば custom domain の routes を入れる", () => {
     const cfg = JSON.parse(readFileSync(writeSiteConfig({ ...SITE, domain: "cms.example.com" }, tmp), "utf8"));
     expect(cfg.routes).toEqual([{ pattern: "cms.example.com", custom_domain: true }]);
@@ -509,6 +562,8 @@ describe("commands", () => {
     const names = buildProgram().commands.map((c) => c.name());
     expect(names).toEqual(expect.arrayContaining(["init", "upgrade", "destroy"]));
     const init = buildProgram().commands.find((c) => c.name() === "init")!;
-    expect(init.options.map((o) => o.long)).toEqual(["--name", "--domain"]);
+    expect(init.options.map((o) => o.long)).toEqual(["--name", "--domain", "--cors-origins"]);
+    const upgrade = buildProgram().commands.find((c) => c.name() === "upgrade")!;
+    expect(upgrade.options.map((o) => o.long)).toEqual(["--cors-origins"]);
   });
 });

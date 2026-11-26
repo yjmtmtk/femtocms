@@ -85,6 +85,32 @@ function checkDomain(domain: string): void {
   }
 }
 
+/**
+ * `--cors-origins a,b` -> "https://a,https://b" (each one an http(s) origin, trailing slash dropped). "" -> "" (allow every origin).
+ * The Worker compares the request's Origin header with these strings exactly, so anything with a path, query or wildcard is refused.
+ */
+export function normalizeCorsOrigins(raw: string): string {
+  return raw.split(",").map((s) => s.trim()).filter(Boolean).map((o) => {
+    let url: URL | undefined;
+    try {
+      url = new URL(o);
+    } catch {
+      url = undefined;
+    }
+    if (!url || (url.protocol !== "https:" && url.protocol !== "http:") || url.pathname !== "/" || url.search || url.hash || o.includes("*") || url.username) {
+      throw new Error(`--cors-origins の "${o}" はオリジンとして読めません（例: https://www.example.com。パスやワイルドカードは使えません）`);
+    }
+    return url.origin;
+  }).join(",");
+}
+
+/** The site record with an updated CORS allow-list (undefined: keep, "": remove). */
+function withCors(site: Site, corsOrigins: string | undefined): Site {
+  if (corsOrigins === undefined) return site;
+  const { corsOrigins: _old, ...rest } = site;
+  return corsOrigins ? { ...rest, corsOrigins } : rest;
+}
+
 interface Account { id: string; name?: string }
 
 async function pickAccount(runner: WranglerRunner, prompt: Prompter, log: (s: string) => void): Promise<string> {
@@ -206,6 +232,8 @@ export function summaryLines(out: { url: string; key: string; mcpUrl: string }, 
 export interface InitOpts {
   name: string;
   domain?: string;
+  /** Comma-separated allowed origins; "" allows every origin; undefined keeps what the profile has. */
+  corsOrigins?: string;
   runner: WranglerRunner;
   prompt: Prompter;
   log: (s: string) => void;
@@ -218,13 +246,19 @@ export async function runInit(opts: InitOpts): Promise<{ url: string; key: strin
   const { name, log, prompt } = opts;
   checkName(name);
   if (opts.domain) checkDomain(opts.domain);
+  const cors = opts.corsOrigins === undefined ? undefined : normalizeCorsOrigins(opts.corsOrigins);
+  const saved = Object.hasOwn(loadConfig().profiles, name) ? loadConfig().profiles[name]?.site : undefined;
 
   const accountId = await pickAccount(opts.runner, prompt, log);
   const d1Name = `femtocms-${name}`;
   const bucket = `femtocms-${name}`;
 
   // The config exists before the first D1/R2 call (it pins the account); the database id is filled in once known.
-  const draft: Site = { workerName: name, d1Name, d1Id: "", bucket, accountId, ...(opts.domain ? { domain: opts.domain } : {}) };
+  const draft: Site = withCors({
+    workerName: name, d1Name, d1Id: "", bucket, accountId,
+    ...(opts.domain ? { domain: opts.domain } : {}),
+    ...(saved?.corsOrigins ? { corsOrigins: saved.corsOrigins } : {}),
+  }, cors);
   const configPath = writeSiteConfig(draft);
   const run = bindSite(opts.runner, accountId, configPath);
 
@@ -273,8 +307,18 @@ function siteOf(profile: string): { profile: Profile; site: Site } {
   return { profile: p, site: p.site };
 }
 
-export async function runUpgrade(opts: { profile: string; runner: WranglerRunner; log: (s: string) => void }): Promise<{ url: string }> {
-  const { profile, site } = siteOf(opts.profile);
+export async function runUpgrade(opts: {
+  profile: string; runner: WranglerRunner; log: (s: string) => void;
+  /** Comma-separated allowed origins; "" allows every origin; undefined keeps the stored value. */
+  corsOrigins?: string;
+}): Promise<{ url: string }> {
+  const { profile, site: stored } = siteOf(opts.profile);
+  const site = withCors(stored, opts.corsOrigins === undefined ? undefined : normalizeCorsOrigins(opts.corsOrigins));
+  if (site !== stored) {
+    const config = loadConfig();
+    config.profiles[opts.profile] = { ...profile, site };
+    saveConfig(config);
+  }
   const run = bindSite(opts.runner, site.accountId, writeSiteConfig(site));
   opts.log("Worker を更新します（少し時間がかかります）");
   await deploy(run, site, opts.log);
@@ -384,19 +428,22 @@ function profileNameOf(cmd: Command): string {
   return name;
 }
 
+const corsHelp = "/api と /media を読めるブラウザのオリジン（カンマ区切り、例: https://www.example.com）。空文字ですべてのオリジンを許可（既定）";
+
 export function registerDeploy(program: Command): void {
   program
     .command("init")
     .description("自分の Cloudflare アカウントに femtocms をデプロイして接続情報を保存します（何度実行しても安全です）")
     .option("--name <name>", "Worker・D1・R2 とプロファイルの名前", "femtocms")
     .option("--domain <host>", "独自ドメイン（例: cms.example.com。そのドメインが Cloudflare の管理下にあること）")
+    .option("--cors-origins <a,b>", corsHelp)
     .action(
-      guarded(async (o: { name: string; domain?: string }, cmd: Command) => {
+      guarded(async (o: { name: string; domain?: string; corsOrigins?: string }, cmd: Command) => {
         assertBundled();
         const json = isJson(cmd);
         // --json: progress goes to stderr and the result (including the key) only to stdout.
         const out = await runInit({
-          name: o.name, domain: o.domain, runner: defaultRunner, prompt: clackPrompter,
+          name: o.name, domain: o.domain, corsOrigins: o.corsOrigins, runner: defaultRunner, prompt: clackPrompter,
           log: json ? stderrLog : stdoutLog, showSummary: !json,
         });
         if (json) print(out, { json: true });
@@ -406,11 +453,14 @@ export function registerDeploy(program: Command): void {
   program
     .command("upgrade")
     .description("同梱の最新の Worker をデプロイし、マイグレーションを適用します")
+    .option("--cors-origins <a,b>", `${corsHelp}。省略時は保存済みの設定のまま`)
     .action(
-      guarded(async (_o: object, cmd: Command) => {
+      guarded(async (o: { corsOrigins?: string }, cmd: Command) => {
         assertBundled();
         const json = isJson(cmd);
-        const out = await runUpgrade({ profile: profileNameOf(cmd), runner: defaultRunner, log: json ? stderrLog : stdoutLog });
+        const out = await runUpgrade({
+          profile: profileNameOf(cmd), corsOrigins: o.corsOrigins, runner: defaultRunner, log: json ? stderrLog : stdoutLog,
+        });
         if (json) print(out, { json: true });
       }),
     );

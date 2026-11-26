@@ -12,6 +12,8 @@ export interface Profile {
     bucket: string;
     accountId: string;
     domain?: string;
+    /** Comma-separated CORS allow-list written as the Worker's CORS_ORIGINS; absent means every origin. */
+    corsOrigins?: string;
   };
 }
 

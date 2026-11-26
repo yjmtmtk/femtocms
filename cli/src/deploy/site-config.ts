@@ -62,7 +62,7 @@ export function writeSiteConfig(site: NonNullable<Profile["site"]>, dir: string 
       ? { d1_databases: [{ binding: "DB", database_name: site.d1Name, database_id: site.d1Id, migrations_dir: migrationsDir }] }
       : {}),
     r2_buckets: [{ binding: "MEDIA", bucket_name: site.bucket }],
-    vars: { SITE_NAME: site.workerName },
+    vars: { SITE_NAME: site.workerName, ...(site.corsOrigins ? { CORS_ORIGINS: site.corsOrigins } : {}) },
   };
   if (site.domain) config.routes = [{ pattern: site.domain, custom_domain: true }];
 

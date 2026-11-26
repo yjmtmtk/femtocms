@@ -163,11 +163,17 @@ export async function uploadMediaBase64(
     mimeType ??= data[1];
     b64 = b64.slice(data[0].length);
   }
-  if (!/^[A-Za-z0-9+/]*={0,2}$/.test(b64) || b64.length % 4 === 1) {
-    throw new FemtoError("bad_request", "base64 が不正です", { hint: "標準の base64（A-Z a-z 0-9 + /）で指定してください" });
-  }
+  const invalid = () =>
+    new FemtoError("bad_request", "base64 が不正です", { hint: "標準の base64（A-Z a-z 0-9 + /）で指定してください" });
+  // Cheap character check first; atob below is the authority on padding and length (it throws on "AA=", "A==", ...).
+  if (!/^[A-Za-z0-9+/]*={0,2}$/.test(b64)) throw invalid();
   if ((b64.length * 3) / 4 > MAX_MEDIA_BYTES + 3) throw tooLarge(); // before decoding, so a huge string is not expanded
-  const raw = atob(b64);
+  let raw: string;
+  try {
+    raw = atob(b64);
+  } catch {
+    throw invalid();
+  }
   const bytes = new Uint8Array(raw.length);
   for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
   return uploadMedia(ctx, { bytes, filename: input.filename, mimeType, alt: input.alt });

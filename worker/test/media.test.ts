@@ -105,6 +105,15 @@ describe("uploadMediaBase64", () => {
   it("不正な base64 は bad_request", async () => {
     await expect(uploadMediaBase64(admin(), { base64: "***not base64***", filename: "a.png" })).rejects.toMatchObject({ code: "bad_request" });
   });
+  it("パディングが壊れた base64 は 500 ではなく bad_request", async () => {
+    for (const base64 of ["AA=", "A==", "AAAAA==", "A", "AAAAA"]) {
+      await expect(uploadMediaBase64(admin(), { base64, filename: "a.bin" })).rejects.toMatchObject({ code: "bad_request" });
+    }
+  });
+  it("パディング無しの base64 は受け付ける", async () => {
+    const m = await uploadMediaBase64(admin(), { base64: "AAA", filename: "a.bin" });
+    expect(m.size).toBe(2);
+  });
   it("20MB を超える base64 は payload_too_large", async () => {
     await expect(uploadMediaBase64(admin(), { base64: "A".repeat(Math.ceil(((MB20 + 1) * 4) / 3) + 4), filename: "big.bin" }))
       .rejects.toMatchObject({ code: "payload_too_large" });

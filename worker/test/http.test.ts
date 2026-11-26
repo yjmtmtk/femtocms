@@ -312,3 +312,31 @@ describe("エラー応答", () => {
     expect(spy).toHaveBeenCalled();
   });
 });
+
+describe("export / import / reset", () => {
+  it("export は admin のみ。取り込みで空のサイトに復元でき、reset は confirm 必須", async () => {
+    await api("POST", "/api/collections", { key: K, body: news });
+    await api("POST", "/api/news", { key: K, body: { data: { title: "冬" }, slug: "winter", status: "published" } });
+    expect((await api("GET", "/api/export")).status).toBe(401);
+    const exp = await api("GET", "/api/export", { key: K });
+    expect(exp.status).toBe(200);
+    const dump = await json(exp);
+    expect(dump).toMatchObject({ format: "femtocms-export", version: 1, collections: [{ name: "news" }], entries: [{ slug: "winter" }] });
+
+    expect((await api("POST", "/api/reset", { key: K })).status).toBe(400);
+    expect(await json(await api("POST", "/api/reset", { key: K, body: { confirm: "dev-site" } }))).toEqual({ trashed: 1 });
+    expect((await api("GET", "/api/news/winter")).status).toBe(404);
+    expect((await api("DELETE", "/api/trash?confirm=dev-site", { key: K })).status).toBe(200);
+
+    expect((await api("POST", "/api/import", { key: K, body: { data: dump } })).status).toBe(422);
+    expect((await api("POST", "/api/import", { key: K, body: { data: dump, mode: "replace" } })).status).toBe(400);
+    expect(await json(await api("POST", "/api/import", { key: K, body: { data: dump, mode: "merge" } })))
+      .toEqual({ collections: 1, entries: 1, media: 0 });
+    expect(await json(await api("GET", "/api/news/winter"))).toMatchObject({ status: "published", data: { title: "冬" } });
+  });
+  it("import の検証エラーは 422 で issues に path が入る", async () => {
+    const res = await api("POST", "/api/import", { key: K, body: { mode: "merge", data: { format: "femtocms-export", version: 1, collections: [], entries: [{ id: "x" }], media: [] } } });
+    expect(res.status).toBe(422);
+    expect((await json(res)).error.issues.map((i: { path: string }) => i.path)).toContain("entries[0].id");
+  });
+});

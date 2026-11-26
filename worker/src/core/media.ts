@@ -9,7 +9,7 @@ export const MAX_MEDIA_BYTES = 20 * 1024 * 1024;
 const MAX_FILENAME_LENGTH = 200;
 const GENERIC_MIME = "application/octet-stream";
 const MIME_RE = /^[a-z0-9][a-z0-9!#$&^_.+-]*\/[a-z0-9][a-z0-9!#$&^_.+-]*$/;
-const r2Key = (id: string) => `media/${id}`;
+export const r2Key = (id: string) => `media/${id}`;
 
 const EXT_MIME: Record<string, string> = {
   png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp", avif: "image/avif",
@@ -63,17 +63,23 @@ async function findRow(ctx: Ctx, id: string): Promise<MediaRow | null> {
 
 export interface UploadInput { bytes: Uint8Array; filename: string; mimeType?: string; alt?: string }
 
-export async function uploadMedia(ctx: Ctx, input: UploadInput, internal?: { id?: string }): Promise<MediaRecord> {
-  requireRole(ctx, "admin");
+/** Validates the bytes and writes the R2 object; returns the row to store. No D1 access (import batches the rows itself). */
+export async function putMediaObject(ctx: Ctx, input: UploadInput, id: string): Promise<MediaRecord> {
   if (input.bytes.byteLength > MAX_MEDIA_BYTES) throw tooLarge();
-  const id = internal?.id ?? newId("m");
   const filename = sanitizeFilename(input.filename);
   const mimeType = normalizeMime(input.mimeType) ?? mimeFromFilename(filename);
   const dims = imageSize(input.bytes, mimeType);
-  const alt = input.alt ?? "";
-  const createdAt = ctx.now().toISOString();
-
   await ctx.bucket.put(r2Key(id), input.bytes, { httpMetadata: { contentType: mimeType } });
+  return {
+    id, filename, mimeType, size: input.bytes.byteLength, width: dims?.width ?? null, height: dims?.height ?? null,
+    alt: input.alt ?? "", createdAt: ctx.now().toISOString(),
+  };
+}
+
+export async function uploadMedia(ctx: Ctx, input: UploadInput, internal?: { id?: string }): Promise<MediaRecord> {
+  requireRole(ctx, "admin");
+  const id = internal?.id ?? newId("m");
+  const m = await putMediaObject(ctx, input, id);
   // internal.id may name an existing row (import): overwrite it, keep its created_at, and bring it back from the trash.
   await ctx.db
     .prepare(
@@ -81,7 +87,7 @@ export async function uploadMedia(ctx: Ctx, input: UploadInput, internal?: { id?
         "ON CONFLICT(id) DO UPDATE SET filename = excluded.filename, mime_type = excluded.mime_type, size = excluded.size, " +
         "width = excluded.width, height = excluded.height, alt = excluded.alt, deleted_at = NULL",
     )
-    .bind(id, filename, mimeType, input.bytes.byteLength, dims?.width ?? null, dims?.height ?? null, alt, createdAt)
+    .bind(id, m.filename, m.mimeType, m.size, m.width, m.height, m.alt, m.createdAt)
     .run();
   await bumpVersion(ctx);
   return toRecord((await findRow(ctx, id))!);
@@ -116,40 +122,42 @@ async function readCapped(res: Response): Promise<Uint8Array> {
   return out;
 }
 
-export async function importMediaFromUrl(
-  ctx: Ctx, input: { url: string; filename?: string; alt?: string },
-): Promise<MediaRecord> {
-  requireRole(ctx, "admin");
+/** Fetches an http(s) URL (follows redirects, 20MB cap). Throws bad_request / payload_too_large. */
+export async function fetchRemoteMedia(rawUrl: string): Promise<{ bytes: Uint8Array; contentType: string | null; url: URL }> {
   let url: URL;
   try {
-    url = new URL(input.url);
+    url = new URL(rawUrl);
   } catch {
-    throw badUrl(input.url, "http:// または https:// で始まる URL を指定してください");
+    throw badUrl(rawUrl, "http:// または https:// で始まる URL を指定してください");
   }
   if (url.protocol !== "http:" && url.protocol !== "https:") {
-    throw badUrl(input.url, "http:// または https:// の URL のみ取り込めます");
+    throw badUrl(rawUrl, "http:// または https:// の URL のみ取り込めます");
   }
 
   let res: Response;
   try {
     res = await fetch(url.href, { redirect: "follow" });
   } catch (e) {
-    throw badUrl(input.url, `取得に失敗しました: ${e instanceof Error ? e.message : String(e)}`);
+    throw badUrl(rawUrl, `取得に失敗しました: ${e instanceof Error ? e.message : String(e)}`);
   }
   if (!res.ok) {
     await res.body?.cancel();
-    throw badUrl(input.url, `取得先が HTTP ${res.status} を返しました`);
+    throw badUrl(rawUrl, `取得先が HTTP ${res.status} を返しました`);
   }
-  const bytes = await readCapped(res);
+  return { bytes: await readCapped(res), contentType: normalizeMime(res.headers.get("content-type")), url };
+}
 
+export async function importMediaFromUrl(
+  ctx: Ctx, input: { url: string; filename?: string; alt?: string },
+): Promise<MediaRecord> {
+  requireRole(ctx, "admin");
+  const { bytes, contentType, url } = await fetchRemoteMedia(input.url);
   let filename = input.filename;
   if (filename === undefined) {
     const last = url.pathname.split("/").filter(Boolean).pop() ?? "";
     try { filename = decodeURIComponent(last); } catch { filename = last; }
   }
-  return uploadMedia(ctx, {
-    bytes, filename, alt: input.alt, mimeType: normalizeMime(res.headers.get("content-type")) ?? undefined,
-  });
+  return uploadMedia(ctx, { bytes, filename, alt: input.alt, mimeType: contentType ?? undefined });
 }
 
 export async function uploadMediaBase64(

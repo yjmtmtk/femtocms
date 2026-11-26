@@ -69,7 +69,7 @@ export async function createCollection(ctx: Ctx, input: unknown): Promise<Collec
   return getCollectionRow(ctx, def.name);
 }
 
-function referencedCollections(fields: FieldDef[]): Array<{ path: string; collection: string }> {
+export function referencedCollections(fields: FieldDef[]): Array<{ path: string; collection: string }> {
   const out: Array<{ path: string; collection: string }> = [];
   const walk = (fs: FieldDef[], base: string) =>
     fs.forEach((f, i) => {

@@ -12,6 +12,7 @@ import {
 import { presentEntries, presentEntry, presentMedia } from "../core/present";
 import { createPreviewUrl, MAX_PREVIEW_TTL_SECONDS, readEntryWithPreview } from "../core/preview";
 import { parseListParams } from "../core/query";
+import { exportData, importData, resetSite, type ExportData } from "../core/transfer";
 import { deletePermanently, emptyTrash, listTrash, restoreFromTrash, trashCollection, trashEntry, trashMedia } from "../core/trash";
 import type { Status } from "../core/types";
 import type { AuthEnv } from "./auth";
@@ -189,7 +190,24 @@ api.post("/keys", async (c) => {
 });
 api.delete("/keys/:id", async (c) => c.json(await revokeKey(c.get("ctx"), c.req.param("id"))));
 
-// Later tasks register /export, /import, /reset and /openapi.json HERE, before the `/:c` routes below.
+// --- export / import / reset -------------------------------------------------------------------
+
+api.get("/export", async (c) => c.json(await exportData(c.get("ctx"))));
+api.post("/import", async (c) => {
+  const body = await jsonObject(c);
+  const mode = body.mode;
+  if (mode !== "merge" && mode !== "replace") {
+    throw invalid([{ path: "mode", message: 'mode は "merge" か "replace" です', expected: "merge | replace", received: mode }]);
+  }
+  return c.json(await importData(c.get("ctx"), { data: body.data as ExportData, mode, confirm: optionalString(body, "confirm") }));
+});
+api.post("/reset", async (c) => {
+  const text = await c.req.text();
+  const body = text.trim() === "" ? {} : await jsonObject(c);
+  return c.json(await resetSite(c.get("ctx"), optionalString(body, "confirm")));
+});
+
+// Later tasks register /openapi.json HERE, before the `/:c` routes below.
 
 // --- entries (/:c must stay after every fixed route above) --------------------------------------
 

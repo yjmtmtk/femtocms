@@ -1,0 +1,17 @@
+{
+  "name": "femtocms-dev",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-11-18",
+  "compatibility_flags": ["nodejs_compat"],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "femtocms-dev",
+      "database_id": "local",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "r2_buckets": [{ "binding": "MEDIA", "bucket_name": "femtocms-dev" }],
+  "vars": { "SITE_NAME": "dev-site" },
+  "rules": [{ "type": "Text", "globs": ["**/*.client.js"], "fallthrough": true }]
+}

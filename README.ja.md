@@ -126,7 +126,7 @@ femtocms は、管理画面のない CMS です。**自分の Cloudflare アカ�
 
 | コマンド | 内容 |
 |---|---|
-| `init [--name <name>] [--domain <host>] [--cors-origins <a,b>]` | 自分の Cloudflare アカウントに femtocms をデプロイし、接続情報を保存します。`--name`（既定 `femtocms`）は Worker・D1・R2・プロファイルの名前で、同じアカウントに複数のサイトを置けます。`--domain` は独自ドメインの割り当てです（そのドメインが Cloudflare にあること）。`--cors-origins` は API を呼べるブラウザのオリジンを絞ります（[キャッシュ](#キャッシュ)を参照）。もう一度 `init` を実行しても、指定しなかった `--domain` と `--cors-origins` は保存済みの値のままです。 |
+| `init [--name <name>] [--account <id>] [--domain <host>] [--cors-origins <a,b>]` | 自分の Cloudflare アカウントに femtocms をデプロイし、接続情報を保存します。`--name`（既定 `femtocms`）は Worker・D1・R2・プロファイルの名前で、同じアカウントに複数のサイトを置けます。`--domain` は独自ドメインの割り当てです（そのドメインが Cloudflare にあること）。`--cors-origins` は API を呼べるブラウザのオリジンを絞ります（[キャッシュ](#キャッシュ)を参照）。もう一度 `init` を実行しても、指定しなかった `--domain` と `--cors-origins` は保存済みの値のままです。 ログインで使える Cloudflare アカウントが複数あると、どれを使うか聞かれます。`--account <id>`（または環境変数 `CLOUDFLARE_ACCOUNT_ID`）で先に指定すれば聞かれないので、AI や CI からも実行できます。 |
 | `upgrade [--cors-origins <a,b>]` | 新しいデータベースのマイグレーションを適用してから、インストールしたパッケージに同梱の Worker をデプロイします。 |
 | `reset [--confirm <サイト名>]` | すべてのコンテンツ（エントリ・メディア・コレクション）をゴミ箱へ移します。API キーは残ります。完全には消えません（消すには `trash empty --confirm <サイト名>`）。 |
 | `destroy` | Worker・D1・R2 を削除します（[アンインストール](#アンインストール)を参照）。 |

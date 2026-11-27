@@ -113,7 +113,8 @@ function withCors(site: Site, corsOrigins: string | undefined): Site {
 
 interface Account { id: string; name?: string }
 
-async function pickAccount(runner: WranglerRunner, prompt: Prompter, log: (s: string) => void): Promise<string> {
+// `wanted` (--account or CLOUDFLARE_ACCOUNT_ID) skips the question, so init also runs without a terminal (AI agents, CI).
+async function pickAccount(runner: WranglerRunner, prompt: Prompter, log: (s: string) => void, wanted?: string): Promise<string> {
   let who = await runner(["whoami", "--json"]);
   if (who.code !== 0) {
     log("Cloudflare にログインします。ブラウザが開くので、許可してください。");
@@ -124,6 +125,13 @@ async function pickAccount(runner: WranglerRunner, prompt: Prompter, log: (s: st
   }
   const accounts = ((extractJson(who.stdout) as { accounts?: Account[] } | undefined)?.accounts ?? []).filter((a) => a?.id);
   if (accounts.length === 0) throw new Error("この Cloudflare ログインに使えるアカウントがありません");
+  if (wanted) {
+    if (accounts.some((a) => a.id === wanted)) return wanted;
+    throw new Error(
+      `アカウント "${wanted}" はこの Cloudflare ログインでは使えません。使えるアカウント:\n` +
+      accounts.map((a) => `  ${a.id}${a.name ? `  ${a.name}` : ""}`).join("\n"),
+    );
+  }
   if (accounts.length === 1) return accounts[0]!.id;
   return prompt.select("使う Cloudflare アカウントを選んでください", accounts.map((a) => ({ value: a.id, label: a.name ? `${a.name} (${a.id})` : a.id })));
 }
@@ -240,6 +248,8 @@ export function summaryLines(out: { url: string; key: string; mcpUrl: string }, 
 
 export interface InitOpts {
   name: string;
+  /** Cloudflare account id; without it a login with several accounts is asked which one to use. */
+  account?: string;
   domain?: string;
   /** Comma-separated allowed origins; "" allows every origin; undefined keeps what the profile has. */
   corsOrigins?: string;
@@ -258,7 +268,7 @@ export async function runInit(opts: InitOpts): Promise<{ url: string; key: strin
   const cors = opts.corsOrigins === undefined ? undefined : normalizeCorsOrigins(opts.corsOrigins);
   const saved = Object.hasOwn(loadConfig().profiles, name) ? loadConfig().profiles[name]?.site : undefined;
 
-  const accountId = await pickAccount(opts.runner, prompt, log);
+  const accountId = await pickAccount(opts.runner, prompt, log, opts.account);
   const d1Name = `femtocms-${name}`;
   const bucket = `femtocms-${name}`;
 
@@ -464,15 +474,17 @@ export function registerDeploy(program: Command): void {
     .command("init")
     .description("自分の Cloudflare アカウントに femtocms をデプロイして接続情報を保存します（何度実行しても安全です）")
     .option("--name <name>", "Worker・D1・R2 とプロファイルの名前", "femtocms")
+    .option("--account <id>", "使う Cloudflare アカウントの ID（既定は環境変数 CLOUDFLARE_ACCOUNT_ID。どちらもなく複数あれば選ばせる）")
     .option("--domain <host>", "独自ドメイン（例: cms.example.com。そのドメインが Cloudflare の管理下にあること）")
     .option("--cors-origins <a,b>", corsHelp)
     .action(
-      guarded(async (o: { name: string; domain?: string; corsOrigins?: string }, cmd: Command) => {
+      guarded(async (o: { name: string; account?: string; domain?: string; corsOrigins?: string }, cmd: Command) => {
         assertBundled();
         const json = isJson(cmd);
         // --json: progress goes to stderr and the result (including the key) only to stdout.
         const out = await runInit({
-          name: o.name, domain: o.domain, corsOrigins: o.corsOrigins, runner: defaultRunner, prompt: clackPrompter,
+          name: o.name, account: o.account ?? (process.env.CLOUDFLARE_ACCOUNT_ID || undefined), domain: o.domain,
+          corsOrigins: o.corsOrigins, runner: defaultRunner, prompt: clackPrompter,
           log: json ? stderrLog : stdoutLog, showSummary: !json,
         });
         if (json) print(out, { json: true });

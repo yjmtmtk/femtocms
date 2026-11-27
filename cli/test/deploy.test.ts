@@ -243,6 +243,26 @@ describe("runInit", () => {
     expect(loadConfig().profiles.femtocms!.site!.accountId).toBe("acc2");
   });
 
+  it("account を指定すれば選ばせずにそのアカウントを使う（画面のない環境・AI から実行できる）", async () => {
+    const r = fakeRunner(happy({
+      "whoami --json": ok(JSON.stringify({ accounts: [{ id: "acc1", name: "one" }, { id: "acc2", name: "two" }] })),
+    }));
+    const p = fakePrompt();
+    await runInit({ name: "femtocms", account: "acc2", runner: r.run, prompt: p.prompt, log: () => {} });
+    expect(p.log.selects).toHaveLength(0);
+    expect(r.calls.filter((c) => c.args[0] !== "whoami").every((c) => c.env?.CLOUDFLARE_ACCOUNT_ID === "acc2")).toBe(true);
+    expect(loadConfig().profiles.femtocms!.site!.accountId).toBe("acc2");
+  });
+
+  it("このログインで使えないアカウントを指定したら、何も作らずに使えるアカウントを示して止まる", async () => {
+    const r = fakeRunner(happy({
+      "whoami --json": ok(JSON.stringify({ accounts: [{ id: "acc1", name: "one" }, { id: "acc2", name: "two" }] })),
+    }));
+    await expect(runInit({ name: "femtocms", account: "nope", runner: r.run, prompt: fakePrompt().prompt, log: () => {} }))
+      .rejects.toThrow(/nope[\s\S]*acc1[\s\S]*acc2/);
+    expect(r.calls.filter((c) => c.args[0] !== "whoami")).toHaveLength(0);
+  });
+
   it("--domain を付けずに再度 init しても、保存済みの domain を保つ", async () => {
     seedProfile({ url: "https://cms.example.com", site: { ...SITE, domain: "cms.example.com" } });
     const r = fakeRunner(happy({ deploy: ok("Deployed femtocms triggers\n  cms.example.com (custom domain)") }));
@@ -636,7 +656,7 @@ describe("commands", () => {
     const names = buildProgram().commands.map((c) => c.name());
     expect(names).toEqual(expect.arrayContaining(["init", "upgrade", "destroy"]));
     const init = buildProgram().commands.find((c) => c.name() === "init")!;
-    expect(init.options.map((o) => o.long)).toEqual(["--name", "--domain", "--cors-origins"]);
+    expect(init.options.map((o) => o.long)).toEqual(["--name", "--account", "--domain", "--cors-origins"]);
     const upgrade = buildProgram().commands.find((c) => c.name() === "upgrade")!;
     expect(upgrade.options.map((o) => o.long)).toEqual(["--cors-origins"]);
   });

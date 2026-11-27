@@ -405,11 +405,14 @@ async function emptySite(client: FemtoClient, siteName: string, log: (s: string)
 }
 
 export async function runDestroy(opts: {
-  profile: string; runner: WranglerRunner; prompt: Prompter; log: (s: string) => void; fetch?: typeof fetch;
+  profile: string;
+  /** The Worker name, given up front (--confirm) instead of typed at the prompt, so destroy runs without a terminal. */
+  confirm?: string;
+  runner: WranglerRunner; prompt: Prompter; log: (s: string) => void; fetch?: typeof fetch;
 }): Promise<boolean> {
   const { log } = opts;
   const { profile, site } = siteOf(opts.profile);
-  const typed = (await opts.prompt.text(
+  const typed = (opts.confirm ?? await opts.prompt.text(
     `Cloudflare 上の Worker・D1・R2（記事・メディアを含むすべて）を削除します。元には戻せません。\n続けるには Worker 名 "${site.workerName}" を入力してください`,
   )).trim();
   if (typed !== site.workerName) {
@@ -509,10 +512,13 @@ export function registerDeploy(program: Command): void {
   program
     .command("destroy")
     .description("Cloudflare 上の Worker・D1・R2 をすべて削除します（Worker 名の入力が必要）")
+    .option("--confirm <worker-name>", "入力のかわりに Worker 名を渡す（一致しなければ何もしない。AI や CI から実行するとき用）")
     .action(
-      guarded(async (_o: object, cmd: Command) => {
+      guarded(async (o: { confirm?: string }, cmd: Command) => {
         const json = isJson(cmd);
-        const destroyed = await runDestroy({ profile: profileNameOf(cmd), runner: defaultRunner, prompt: clackPrompter, log: json ? stderrLog : stdoutLog });
+        const destroyed = await runDestroy({
+          profile: profileNameOf(cmd), confirm: o.confirm, runner: defaultRunner, prompt: clackPrompter, log: json ? stderrLog : stdoutLog,
+        });
         if (json) print({ destroyed }, { json: true });
       }),
     );

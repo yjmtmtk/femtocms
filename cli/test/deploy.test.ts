@@ -423,6 +423,21 @@ describe("runDestroy", () => {
     expect(loadConfig().profiles.femtocms).toBeDefined();
   });
 
+  it("confirm に Worker 名を渡せば入力を求めずに削除する（画面のない環境・AI から実行できる）。違えば何もしない", async () => {
+    seedProfile();
+    const p = fakePrompt();
+    const f = fakeFetch();
+    const bad = fakeRunner(destroyReplies);
+    expect(await runDestroy({ profile: "femtocms", confirm: "other", runner: bad.run, prompt: p.prompt, log: () => {}, fetch: f.fn })).toBe(false);
+    expect(bad.calls).toHaveLength(0);
+    expect(f.calls).toHaveLength(0);
+    const r = fakeRunner(destroyReplies);
+    expect(await runDestroy({ profile: "femtocms", confirm: "femtocms", runner: r.run, prompt: p.prompt, log: () => {}, fetch: f.fn })).toBe(true);
+    expect(p.log.texts).toHaveLength(0);
+    expect(r.calls).toHaveLength(3);
+    expect(loadConfig().profiles.femtocms).toBeUndefined();
+  });
+
   it("一致したら API で空にしてから R2・Worker・D1 の順に削除し、プロファイルと生成した設定を消す", async () => {
     seedProfile();
     const r = fakeRunner(destroyReplies);
@@ -659,5 +674,7 @@ describe("commands", () => {
     expect(init.options.map((o) => o.long)).toEqual(["--name", "--account", "--domain", "--cors-origins"]);
     const upgrade = buildProgram().commands.find((c) => c.name() === "upgrade")!;
     expect(upgrade.options.map((o) => o.long)).toEqual(["--cors-origins"]);
+    const destroy = buildProgram().commands.find((c) => c.name() === "destroy")!;
+    expect(destroy.options.map((o) => o.long)).toEqual(["--confirm"]);
   });
 });

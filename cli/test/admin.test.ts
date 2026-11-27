@@ -112,3 +112,10 @@ describe("logout", () => {
     await expect(run("logout")).rejects.toThrow("exit 2");
   });
 });
+
+describe("--version", () => {
+  it("reports the package.json version", async () => {
+    const { default: pkg } = await import("../../package.json");
+    expect(buildProgram().version()).toBe(pkg.version);
+  });
+});

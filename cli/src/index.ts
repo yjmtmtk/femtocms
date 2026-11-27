@@ -5,12 +5,14 @@ import { Command } from "commander";
 import { registerAdmin } from "./commands/admin";
 import { registerContent } from "./commands/content";
 import { registerDeploy } from "./commands/deploy";
+import { VERSION } from "../../worker/src/version";
 
 export function buildProgram(): Command {
   const program = new Command();
   program
     .name("femtocms")
     .description("femtocms command line interface")
+    .version(VERSION, "-v, --version", "Print the femtocms version")
     .option("--json", "Print the result as JSON")
     .option("--profile <name>", "Profile to use");
   registerAdmin(program);

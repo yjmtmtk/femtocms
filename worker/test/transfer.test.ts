@@ -53,7 +53,7 @@ const issuesOf = async (p: Promise<unknown>) => {
 };
 
 describe("exportData", () => {
-  it("コレクション定義・エントリ・メディアを出し、ゴミ箱・settings・api_keys は含めない", async () => {
+  it("outputs collection definitions, entries and media, and does not include the trash, settings or api_keys", async () => {
     const { media, entry, other } = await seed();
     await createCollection(admin(), { name: "gone", fields: [] });
     await trashCollection(admin(), "gone");
@@ -71,7 +71,7 @@ describe("exportData", () => {
     expect(dump.media).toEqual([{ ...media, url: `https://cms.test/media/${media.id}/cover.png` }]);
     expect(JSON.stringify(dump)).not.toMatch(/preview_secret|content_version|api_keys|hash/);
   });
-  describe("どんな状態のサイトでも export -> import で戻せる (R11)", () => {
+  describe("a site in any state can be restored with export -> import (R11)", () => {
     const roundTrip = async () => {
       const dump = await exportData(admin());
       await resetSite(admin(), "dev-site");
@@ -81,7 +81,7 @@ describe("exportData", () => {
       return dump;
     };
 
-    it("ゴミ箱・完全削除されたメディア / エントリを指す値は出さない", async () => {
+    it("values pointing to trashed or permanently deleted media / entries are not output", async () => {
       const { media, entry, other } = await seed();
       await trashMedia(admin(), media.id);
       const dump = await roundTrip();
@@ -89,7 +89,7 @@ describe("exportData", () => {
       expect(dump.entries.find((e) => e.id === entry.id)!.data).toEqual({ title: "冬", related: other.id });
       expect((await getEntryRecord(admin(), "news", entry.id)).data).toEqual({ title: "冬", related: other.id });
     });
-    it("参照先エントリがゴミ箱にある場合も同様", async () => {
+    it("the same when the referenced entry is in the trash", async () => {
       const { entry, other } = await seed();
       await trashEntry(admin(), "news", other.id);
       const dump = await roundTrip();
@@ -97,7 +97,7 @@ describe("exportData", () => {
       expect(dump.entries[0].data).toMatchObject({ title: "冬" });
       expect(dump.entries[0].data).not.toHaveProperty("related");
     });
-    it("list の中の宙に浮いた参照だけを落とし、他の値は残す", async () => {
+    it("only dangling references inside a list are dropped, and other values are kept", async () => {
       const media = await uploadMedia(admin(), { bytes: fixtures.png, filename: "a.png" });
       const gone = await uploadMedia(admin(), { bytes: fixtures.png, filename: "b.png" });
       await createCollection(admin(), {
@@ -108,7 +108,7 @@ describe("exportData", () => {
       const dump = await roundTrip();
       expect(dump.entries[0].data).toEqual({ items: [{ img: media.id, t: "1" }, { t: "2" }] });
     });
-    it("multiple の gallery は宙に浮いた要素だけを落とし、配列は残す", async () => {
+    it("for a multiple gallery, only dangling elements are dropped and the array is kept", async () => {
       const a = await uploadMedia(admin(), { bytes: fixtures.png, filename: "a.png" });
       const b = await uploadMedia(admin(), { bytes: fixtures.png, filename: "b.png" });
       await createCollection(admin(), { name: "album", fields: [{ name: "gallery", type: "image", multiple: true }] });
@@ -118,7 +118,7 @@ describe("exportData", () => {
       expect(dump.entries[0].data).toEqual({ gallery: [a.id] });
       expect((await getEntryRecord(admin(), "album", e.id)).data).toEqual({ gallery: [a.id] });
     });
-    it("公開後に required のフィールドを足しても戻せる", async () => {
+    it("can be restored even if a required field was added after publishing", async () => {
       const { entry } = await seed();
       await updateCollection(admin(), "news", { fields: [...newsDef.fields, { name: "subtitle", type: "text", required: true }] });
       await roundTrip();
@@ -126,7 +126,7 @@ describe("exportData", () => {
       expect(e.status).toBe("published");
       expect(e.data).not.toHaveProperty("subtitle");
     });
-    it("フィールドの型を変えて保存値が合わなくなっても、その値を除いて戻せる", async () => {
+    it("even if a field type was changed and stored values no longer fit, it can be restored without those values", async () => {
       await createCollection(admin(), { name: "page", fields: [{ name: "n", type: "text" }, { name: "keep", type: "text" }] });
       const e = await createEntry(admin(), "page", { data: { n: "abc", keep: "ok" } });
       await updateCollection(admin(), "page", { fields: [{ name: "n", type: "number" }, { name: "keep", type: "text" }] });
@@ -135,7 +135,7 @@ describe("exportData", () => {
       expect((await getEntryRecord(admin(), "page", e.id)).data).toEqual({ keep: "ok" });
     });
   });
-  it("スキーマから消えたフィールドの値（古いキー）は出さず、そのまま取り込める（list の中も同様）", async () => {
+  it("values of fields removed from the schema (old keys) are not output, and the data can be imported as is (also inside list)", async () => {
     await createCollection(admin(), {
       name: "page",
       fields: [
@@ -156,13 +156,13 @@ describe("exportData", () => {
     await importData(admin(), { data: dump, mode: "merge" });
     expect((await getEntryRecord(admin(), "page", e.id)).data).toEqual({ title: "t", items: [{ a: "1" }] });
   });
-  it("admin 以外は不可", async () => {
+  it("not allowed except for admin", async () => {
     await expect(exportData(reader())).rejects.toMatchObject({ code: "forbidden" });
   });
 });
 
 describe("importData", () => {
-  it("export したものを空にしたサイトへ merge で取り込むと同じ内容になる", async () => {
+  it("importing an export into an emptied site with merge gives the same content", async () => {
     await seed();
     const dump = await exportData(admin());
     await resetSite(admin(), "dev-site");
@@ -178,7 +178,7 @@ describe("importData", () => {
     expect((await env.MEDIA.head(`media/${dump.media[0].id}`))?.size).toBe(fixtures.png.byteLength);
     expect((await getEntryRecord(admin(), "news", "winter")).status).toBe("published");
   });
-  it("日時は ISO 8601 (UTC, ミリ秒付き) にそろえ、公開済みで publishedAt が null なら updatedAt を使う", async () => {
+  it("date-times are normalized to ISO 8601 (UTC, with milliseconds), and for a published entry with a null publishedAt, updatedAt is used", async () => {
     await createCollection(admin(), newsDef);
     const entry = (id: string, over: Record<string, unknown>) => ({
       id, collection: "news", slug: null, status: "published", data: { title: "t" },
@@ -193,7 +193,7 @@ describe("importData", () => {
     expect(b.publishedAt).toBe("2026-01-03T00:00:00.000Z");
     expect(c.publishedAt).toBeNull();
   });
-  it("merge は既存を上書きし、ゴミ箱のものは戻す。同名コレクションは定義を上書きして id を保つ", async () => {
+  it("merge overwrites existing items and restores trashed ones; a collection with the same name gets its definition overwritten and keeps its id", async () => {
     const { entry } = await seed();
     const dump = await exportData(admin());
     const colId = (await env.DB.prepare("SELECT id FROM collections WHERE name = 'news'").first<{ id: string }>())!.id;
@@ -209,7 +209,7 @@ describe("importData", () => {
     expect(JSON.parse(row!.data as string).title).toBe("春");
     expect(await listTrash(admin())).toEqual([]);
   });
-  it("コレクションをゴミ箱から戻す際、取り込みに無いエントリはゴミ箱に残る", async () => {
+  it("when a collection is restored from the trash, entries that are not in the import stay in the trash", async () => {
     const { entry, other } = await seed();
     const dump = await exportData(admin());
     await trashCollection(admin(), "news");
@@ -219,7 +219,7 @@ describe("importData", () => {
     expect(await listTrash(admin())).toEqual([expect.objectContaining({ type: "entry", id: other.id })]);
     await restoreFromTrash(admin(), other.id);
   });
-  it("replace は confirm が要り（何もしない）、既存はゴミ箱に入る", async () => {
+  it("replace needs confirm (does nothing without it), and existing items go to the trash", async () => {
     await seed();
     await expect(importData(admin(), { data: emptyDump(), mode: "replace" })).rejects.toMatchObject({ code: "confirmation_required" });
     expect(await listTrash(admin())).toEqual([]);
@@ -230,7 +230,7 @@ describe("importData", () => {
     expect(await count("collections")).toBe(1);
     expect(await version()).toBe(v + 1);
   });
-  it("replace: 既存と同じ id のものは戻って上書きされ、残りはゴミ箱に残る", async () => {
+  it("replace: items with the same id as existing ones are restored and overwritten, and the rest stay in the trash", async () => {
     const { entry, other, media } = await seed();
     const dump = await exportData(admin());
     dump.entries = dump.entries.filter((e) => e.id === entry.id);
@@ -241,7 +241,7 @@ describe("importData", () => {
     expect(trash).toEqual([expect.objectContaining({ type: "entry", id: other.id })]);
     expect((await exportData(admin())).media.map((m) => m.id)).toEqual([media.id]);
   });
-  it("url が無いメディアは R2 に同じ id のファイルがあれば行だけ作る。無ければ issue", async () => {
+  it("media without url only gets a row if R2 has a file with the same id; otherwise it is an issue", async () => {
     const { media } = await seed();
     const dump = await exportData(admin());
     const spy = vi.spyOn(globalThis, "fetch");
@@ -255,7 +255,7 @@ describe("importData", () => {
     await env.MEDIA.delete(`media/${media.id}`);
     expect(await issuesOf(importData(admin(), { data: dump, mode: "merge" }))).toEqual(["media[0].url"]);
   });
-  it("url が無い / 自サイトのメディアも、他のアップロードと同じ清掃をし、size は R2 から取る", async () => {
+  it("media without url or from this site is sanitized like other uploads, and size is taken from R2", async () => {
     const { media } = await seed();
     const dump = await exportData(admin());
     Object.assign(dump.media[0], { filename: "a\u2028b\u0001/c.png", mimeType: "not a mime", size: 999999 });
@@ -273,7 +273,7 @@ describe("importData", () => {
     expect(spy).not.toHaveBeenCalled();
     expect((await exportData(admin())).media[0]).toMatchObject({ filename: "d.jpg", mimeType: "image/jpeg", size: fixtures.png.byteLength });
   });
-  it("R2 の確認はメディアごとの head ではなく media/ の list をページごとにまとめて行う", async () => {
+  it("the R2 check uses paged lists of media/ instead of a head per media item", async () => {
     await createCollection(admin(), newsDef);
     const ids: string[] = [];
     for (let i = 0; i < 5; i++) ids.push((await uploadMedia(admin(), { bytes: fixtures.png, filename: `p${i}.png` })).id);
@@ -298,7 +298,7 @@ describe("importData", () => {
     expect(exported.every((m) => m.size === fixtures.png.byteLength)).toBe(true);
   });
 
-  it("自サイトの url で R2 に実体があれば fetch せずに済ます", async () => {
+  it("if the url is on this site and the object exists in R2, no fetch is needed", async () => {
     await seed();
     const dump = await exportData(admin());
     const spy = vi.spyOn(globalThis, "fetch");
@@ -306,7 +306,7 @@ describe("importData", () => {
     expect(spy).not.toHaveBeenCalled();
   });
 
-  it("大きな取り込みは複数チャンクに分かれても全件入る（日本語・引用符を含むデータも崩れない）", async () => {
+  it("a large import is split into several chunks and still imports everything (data with Japanese and quotes is not corrupted)", async () => {
     const entries = Array.from({ length: 120 }, (_, i) => ({
       id: `e_${String(i).padStart(12, "0")}`, collection: "memo", slug: `s-${i}`, status: "draft" as const,
       data: { body: `「${i}」'quote' "dq" \\ ${"あ".repeat(3000)}` },
@@ -317,10 +317,10 @@ describe("importData", () => {
     expect((await exportData(admin())).entries).toEqual(entries);
   });
 
-  describe("検証（何も書かない）", () => {
+  describe("validation (nothing is written)", () => {
     const snapshot = async () => [await count("collections"), await count("entries"), await count("media"), await version()];
 
-    it("壊れた参照があると何も書かずに validation_failed。path は entries[i].data.cover の形", async () => {
+    it("a broken reference gives validation_failed without writing anything; the path looks like entries[i].data.cover", async () => {
       await seed();
       const dump = await exportData(admin());
       await emptyTrash(admin(), "dev-site");
@@ -335,7 +335,7 @@ describe("importData", () => {
       expect(await snapshot()).toEqual(before);
       expect(spy).not.toHaveBeenCalled(); // not even media fetches
     });
-    it("取り込みに含まれるメディア・エントリや既存のものは参照できる。別コレクションの参照は不可", async () => {
+    it("media and entries in the import, and existing ones, can be referenced; a reference to another collection is not allowed", async () => {
       await seed();
       await createCollection(admin(), { name: "blog", fields: [{ name: "ref", type: "reference", collection: "news" }] });
       const dump = emptyDump({
@@ -355,7 +355,7 @@ describe("importData", () => {
       // replace: everything existing goes to the trash, so a reference to it is no longer valid
       expect(await issuesOf(importData(admin(), { data: dump, mode: "replace", confirm: "dev-site" }))).toEqual(["collections[0].fields[0].collection", "entries[0].data.ref"]);
     });
-    it("構造・コレクション定義・エントリ・メディアの問題をまとめて報告する", async () => {
+    it("problems in the structure, collection definitions, entries and media are reported together", async () => {
       const dump = emptyDump({
         collections: [
           { name: "ok", fields: [{ name: "a", type: "text" }] },
@@ -379,7 +379,7 @@ describe("importData", () => {
       ]));
       expect(await snapshot()).toEqual(before);
     });
-    it("required は取り込みでは強制しない（published でも欠けていてよい）が、型は検証する", async () => {
+    it("required is not enforced on import (it may be missing even when published), but types are validated", async () => {
       const col = { name: "n", fields: [{ name: "title", type: "text", required: true }] };
       const mk = (data: unknown) => emptyDump({
         collections: [col] as never,
@@ -388,29 +388,29 @@ describe("importData", () => {
       expect(await issuesOf(importData(admin(), { data: mk({ title: 1 }), mode: "merge" }))).toEqual(["entries[0].data.title"]);
       await importData(admin(), { data: mk({}), mode: "merge" });
     });
-    it("format / version / 配列が無いと validation_failed", async () => {
+    it("a missing format / version / array gives validation_failed", async () => {
       const paths = await issuesOf(importData(admin(), { data: { format: "x", version: 2 } as never, mode: "merge" }));
       expect(paths).toEqual(["format", "version", "collections", "entries", "media"]);
       expect(await issuesOf(importData(admin(), { data: emptyDump(), mode: "other" as never }))).toEqual(["mode"]);
       expect(await issuesOf(importData(admin(), { data: null as never, mode: "merge" }))).toEqual(["data"]);
     });
-    it("別のエントリが同じ slug を使っている（ゴミ箱含む）と entries[i].slug の issue", async () => {
+    it("if another entry uses the same slug (including the trash), there is an issue at entries[i].slug", async () => {
       const { other } = await seed();
       const dump = await exportData(admin());
       await trashEntry(admin(), "news", other.id);
       dump.entries = [{ ...dump.entries.find((e) => e.id === other.id)!, id: "e_aaaaaaaaaaaa" }];
       expect(await issuesOf(importData(admin(), { data: dump, mode: "merge" }))).toEqual(["entries[0].slug"]);
-      // data 内の重複も同じ
+      // duplicates inside data are handled the same way
       dump.entries = [{ ...dump.entries[0], slug: "same" }, { ...dump.entries[0], id: "e_aaaaaaaaaaab", slug: "same" }];
       expect(await issuesOf(importData(admin(), { data: dump, mode: "merge" }))).toEqual(["entries[1].slug"]);
     });
-    it("single コレクションにエントリが2件以上になる取り込みは不可", async () => {
+    it("an import that would put 2 or more entries in a single collection is not allowed", async () => {
       const col = { name: "site", kind: "single", fields: [] };
       const e = (id: string) => ({ id, collection: "site", slug: null, status: "draft", data: {}, createdAt: "2026-01-01", updatedAt: "2026-01-01", publishedAt: null });
       const dump = emptyDump({ collections: [col] as never, entries: [e("e_aaaaaaaaaaaa"), e("e_aaaaaaaaaaab")] as never });
       expect(await issuesOf(importData(admin(), { data: dump, mode: "merge" }))).toEqual(["entries[1]"]);
     });
-    it("メディアの取得に失敗したら D1 は何も書かない（path は media[i].url）", async () => {
+    it("if fetching media fails, nothing is written to D1 (the path is media[i].url)", async () => {
       await seed();
       const dump = await exportData(admin());
       await resetSite(admin(), "dev-site");
@@ -423,7 +423,7 @@ describe("importData", () => {
       expect(await issuesOf(importData(admin(), { data: dump, mode: "merge" }))).toEqual(["media[1].url"]);
       expect(await snapshot()).toEqual(before);
     });
-    it("メディアの取得に失敗したら、この取り込みが新しく書いた R2 オブジェクトは消し、前からあったものは残す", async () => {
+    it("if fetching media fails, R2 objects newly written by this import are deleted, and ones that already existed are kept", async () => {
       await seed();
       const dump = await exportData(admin());
       const kept = await uploadMedia(admin(), { bytes: fixtures.gif, filename: "kept.gif" });
@@ -440,7 +440,7 @@ describe("importData", () => {
       const keys = (await env.MEDIA.list({ prefix: "media/" })).objects.map((o) => o.key).sort();
       expect(keys).toEqual([`media/${base.id}`, `media/${kept.id}`].sort());
     });
-    it("最後の D1 の書き込みが失敗しても、新しく書いた R2 オブジェクトは消す", async () => {
+    it("even if the last D1 write fails, newly written R2 objects are deleted", async () => {
       const ctx = admin();
       const db = new Proxy(ctx.db, { get(t, p) {
         if (p === "batch") return async () => { throw new Error("D1_ERROR: simulated"); };
@@ -455,7 +455,7 @@ describe("importData", () => {
       await expect(importData({ ...ctx, db }, { data: dump, mode: "merge" })).rejects.toThrow("simulated");
       expect((await env.MEDIA.list({ prefix: "media/" })).objects).toEqual([]);
     });
-    it("replace でもメディア取得に失敗したら既存はそのまま（ゴミ箱に移さない）", async () => {
+    it("even with replace, if fetching media fails the existing items are left as they are (not moved to the trash)", async () => {
       await seed();
       const dump = await exportData(admin());
       dump.media[0].url = "https://example.com/missing.png";
@@ -464,7 +464,7 @@ describe("importData", () => {
       expect(await issuesOf(importData(admin(), { data: dump, mode: "replace", confirm: "dev-site" }))).toEqual(["media[0].url"]);
       expect(await listTrash(admin())).toEqual([]);
     });
-    it("20MB を超えるメディアは issue", async () => {
+    it("media over 20MB is an issue", async () => {
       await seed();
       const dump = await exportData(admin());
       await env.MEDIA.delete(`media/${dump.media[0].id}`);
@@ -472,20 +472,20 @@ describe("importData", () => {
         new Response("x", { headers: { "content-length": String(21 * 1024 * 1024) } }));
       expect(await issuesOf(importData(admin(), { data: dump, mode: "merge" }))).toEqual(["media[0].url"]);
     });
-    it("admin 以外は不可", async () => {
+    it("not allowed except for admin", async () => {
       await expect(importData(reader(), { data: emptyDump(), mode: "merge" })).rejects.toMatchObject({ code: "forbidden" });
     });
   });
 });
 
 describe("resetSite", () => {
-  it("confirm が要る", async () => {
+  it("needs confirm", async () => {
     await seed();
     await expect(resetSite(admin(), undefined)).rejects.toMatchObject({ code: "confirmation_required" });
     await expect(resetSite(admin(), "wrong")).rejects.toMatchObject({ code: "confirmation_required" });
     expect(await listTrash(admin())).toEqual([]);
   });
-  it("全部ゴミ箱へ移すだけ。listTrash の件数と一致し、restore で戻せる", async () => {
+  it("only moves everything to the trash; the count matches listTrash, and restore brings it back", async () => {
     const { media, entry } = await seed();
     const v = await version();
     expect(await resetSite(admin(), "dev-site")).toEqual({ trashed: 2 });
@@ -498,14 +498,14 @@ describe("resetSite", () => {
     expect((await getEntryRecord(admin(), "news", entry.id)).status).toBe("published");
     expect((await exportData(admin())).media.map((m) => m.id)).toEqual([media.id]);
   });
-  it("既にゴミ箱にあるものは数えない", async () => {
+  it("items already in the trash are not counted", async () => {
     await seed();
     await createCollection(admin(), { name: "old", fields: [] });
     await trashCollection(admin(), "old");
     expect(await resetSite(admin(), "dev-site")).toEqual({ trashed: 2 });
     expect(await resetSite(admin(), "dev-site")).toEqual({ trashed: 0 });
   });
-  it("admin 以外は不可", async () => {
+  it("not allowed except for admin", async () => {
     await expect(resetSite(reader(), "dev-site")).rejects.toMatchObject({ code: "forbidden" });
   });
 });

@@ -22,11 +22,11 @@ export function printError(err: unknown, opts: { json: boolean }): never {
     if (api?.hint) error.hint = api.hint;
     process.stderr.write(JSON.stringify({ error }, null, 2) + "\n");
   } else {
-    const lines = [`エラー: ${message}`];
+    const lines = [`Error: ${message}`];
     for (const i of api?.issues ?? []) {
       lines.push(`  ${i.path}: ${i.message}${i.expected ? ` (expected: ${i.expected})` : ""}`);
     }
-    if (api?.hint) lines.push(`ヒント: ${api.hint}`);
+    if (api?.hint) lines.push(`Hint: ${api.hint}`);
     process.stderr.write(lines.join("\n") + "\n");
   }
   return exit(api ? 1 : 2);

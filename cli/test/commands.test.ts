@@ -77,7 +77,7 @@ const file = (name: string, text: string) => {
 };
 
 describe("collections", () => {
-  it("create は YAML 定義を読み、フラグで上書きし、--field は name:type[:required] を解釈する", async () => {
+  it("create reads a YAML definition, lets flags override it, and parses --field as name:type[:required]", async () => {
     const r = recorder({ "POST /api/collections": entry });
     const def = file("def.yaml", "name: old\nlabel: 古い\nkind: list\nfields:\n  - name: a\n    type: text\n");
     await collectionsCreate(r.client, { file: def, name: "news", label: "お知らせ" });
@@ -89,7 +89,7 @@ describe("collections", () => {
     });
   });
 
-  it("create は JSON 定義も読める。--field の書式が不正ならリクエスト前にエラー", async () => {
+  it("create also reads a JSON definition. An invalid --field format fails before any request", async () => {
     const r = recorder({ "POST /api/collections": entry });
     await collectionsCreate(r.client, { file: file("d.json", '{"name":"x","fields":[]}') });
     expect(r.calls[0]!.json).toEqual({ name: "x", fields: [] });
@@ -99,7 +99,7 @@ describe("collections", () => {
     expect(r.calls).toHaveLength(1);
   });
 
-  it("update は --file を PATCH する。delete は DELETE", async () => {
+  it("update PATCHes the --file content; delete sends DELETE", async () => {
     const r = recorder({ "PATCH /api/collections/news": newsCollection, "DELETE /api/collections/news": null });
     await collectionsUpdate(r.client, "news", { file: file("u.yml", "label: 新しい\n") });
     expect(r.calls[0]).toMatchObject({ method: "PATCH", path: "/api/collections/news", json: { label: "新しい" } });
@@ -110,7 +110,7 @@ describe("collections", () => {
 });
 
 describe("entries list", () => {
-  it("--filter / --fields / --expand / --sort をクエリに写す", async () => {
+  it("maps --filter / --fields / --expand / --sort to the query", async () => {
     const r = recorder({ "GET /api/news": { items: [], total: 0, limit: 10, offset: 0 } });
     await entriesList(r.client, "news", {
       limit: "5", offset: "10", sort: "-publishedAt", filter: ["kind=x", "price[gte]=100", "price[lte]=500"],
@@ -125,7 +125,7 @@ describe("entries list", () => {
     expect(new URLSearchParams(r.calls[1]!.search).get("before")).toBe("e_abc");
   });
 
-  it("status を指定しなければ送らない（サーバ既定は published）。不正な --filter はエラー", async () => {
+  it("does not send status unless given (the server default is published). An invalid --filter is an error", async () => {
     const r = recorder({ "GET /api/news": { items: [] } });
     await entriesList(r.client, "news", {});
     expect(r.calls[0]!.search).toBe("");
@@ -134,27 +134,27 @@ describe("entries list", () => {
 });
 
 describe("entries create", () => {
-  it("--file は front matter と本文を data に入れる", async () => {
+  it("--file puts the front matter and the body into data", async () => {
     const post = file("post.md", "---\ntitle: 冬\n---\n# 本文");
     const r = recorder({ "GET /api/collections/news": newsCollection, "POST /api/news": entry });
     await entriesCreate(r.client, "news", { file: post, publish: true });
     expect(r.calls.find((c) => c.method === "POST")!.json).toEqual({ data: { title: "冬", body: "# 本文" }, status: "published" });
   });
 
-  it("--publish が無ければ status を送らない。--slug を渡せる", async () => {
+  it("does not send status without --publish. --slug can be passed", async () => {
     const r = recorder({ "GET /api/collections/news": newsCollection, "POST /api/news": entry });
     await entriesCreate(r.client, "news", { data: '{"title":"a"}', slug: "a" });
     expect(r.calls.map((c) => c.method)).toEqual(["GET", "POST"]); // the collection kind decides POST vs PUT
     expect(r.calls[1]!.json).toEqual({ data: { title: "a" }, slug: "a" });
   });
 
-  it("--published-at は body の publishedAt になる", async () => {
+  it("--published-at becomes publishedAt in the body", async () => {
     const r = recorder({ "GET /api/collections/news": newsCollection, "POST /api/news": entry });
     await entriesCreate(r.client, "news", { data: '{"title":"a"}', publishedAt: "2026-01-02T03:04:05Z", publish: true });
     expect(r.calls[1]!.json).toEqual({ data: { title: "a" }, status: "published", publishedAt: "2026-01-02T03:04:05Z" });
   });
 
-  it("--set は型に合わせて変換する", async () => {
+  it("--set converts values to the field type", async () => {
     const r = recorder({ "GET /api/collections/news": newsCollection, "POST /api/news": entry });
     await entriesCreate(r.client, "news", {
       set: [
@@ -170,7 +170,7 @@ describe("entries create", () => {
     });
   });
 
-  it("--set の不正な値・未知のフィールドは書き込み前にエラーになる", async () => {
+  it("an invalid --set value or an unknown field fails before anything is written", async () => {
     const r = recorder({ "GET /api/collections/news": newsCollection, "POST /api/news": entry });
     await expect(entriesCreate(r.client, "news", { set: ["price=abc"] })).rejects.toThrow("price");
     await expect(entriesCreate(r.client, "news", { set: ["price="] })).rejects.toThrow("price");
@@ -183,27 +183,27 @@ describe("entries create", () => {
     expect(writes(r.calls)).toEqual([]);
   });
 
-  it("優先順位は --data、front matter、--set の順に上書き", async () => {
+  it("priority: --data, then front matter, then --set override one another in that order", async () => {
     const post = file("p.md", "---\ntitle: FM\nprice: 1\n---\nhello");
     const r = recorder({ "GET /api/collections/news": newsCollection, "POST /api/news": entry });
     await entriesCreate(r.client, "news", { data: '{"title":"D","kind":"y","price":0}', file: post, set: ["price=3"] });
     expect(r.calls.find((c) => c.method === "POST")!.json.data).toEqual({ title: "FM", kind: "y", price: 3, body: "hello" });
   });
 
-  it("--data は JSON オブジェクトでなければならない", async () => {
+  it("--data must be a JSON object", async () => {
     const r = recorder({ "GET /api/collections/news": newsCollection, "POST /api/news": entry });
     await expect(entriesCreate(r.client, "news", { data: "[1]" })).rejects.toThrow("--data");
     await expect(entriesCreate(r.client, "news", { data: "{x" })).rejects.toThrow("--data");
     expect(r.calls).toEqual([]);
   });
 
-  it("front matter は '---\\n' で始まるときだけ。無ければ全文が本文", async () => {
+  it("front matter exists only when the file starts with '---\\n'; otherwise the whole text is the body", async () => {
     const r = recorder({ "GET /api/collections/news": newsCollection, "POST /api/news": entry });
     await entriesCreate(r.client, "news", { file: file("a.md", "# 見出し\n\n---\n\n続き\n") });
     expect(r.calls.find((c) => c.method === "POST")!.json.data).toEqual({ body: "# 見出し\n\n---\n\n続き" });
   });
 
-  it("--body-field で本文の行き先を選ぶ。存在しない名前はエラー", async () => {
+  it("--body-field chooses where the body goes. A name that does not exist is an error", async () => {
     const col = { ...newsCollection, fields: [{ name: "title", type: "text" }, { name: "intro", type: "markdown" }, { name: "body", type: "markdown" }] };
     const r = recorder({ "GET /api/collections/news": col, "POST /api/news": entry });
     const post = file("a.md", "---\ntitle: t\n---\ntext");
@@ -214,7 +214,7 @@ describe("entries create", () => {
     await expect(entriesCreate(r.client, "news", { file: post, bodyField: "zzz" })).rejects.toThrow("zzz");
   });
 
-  it("markdown フィールドが無くて本文があればエラー。本文が空なら front matter だけ送る", async () => {
+  it("a body with no markdown field is an error. With an empty body, only the front matter is sent", async () => {
     const col = { ...newsCollection, fields: [{ name: "title", type: "text" }] };
     const r = recorder({ "GET /api/collections/news": col, "POST /api/news": entry });
     await expect(entriesCreate(r.client, "news", { file: file("a.md", "---\ntitle: t\n---\nbody") })).rejects.toThrow("markdown");
@@ -223,7 +223,7 @@ describe("entries create", () => {
     expect(r.calls.find((c) => c.method === "POST")!.json.data).toEqual({ title: "t" });
   });
 
-  it("front matter が mapping でない、閉じていない場合はエラー", async () => {
+  it("front matter that is not a mapping, or is not closed, is an error", async () => {
     const r = recorder({ "GET /api/collections/news": newsCollection, "POST /api/news": entry });
     await expect(entriesCreate(r.client, "news", { file: file("a.md", "---\n- a\n- b\n---\nx") })).rejects.toThrow("front matter");
     await expect(entriesCreate(r.client, "news", { file: file("b.md", "---\ntitle: t\nbody") })).rejects.toThrow("front matter");
@@ -234,7 +234,7 @@ describe("entries create", () => {
 describe("single collections", () => {
   const about = { ...newsCollection, name: "about", kind: "single", fields: [{ name: "title", type: "text" }, { name: "body", type: "markdown" }] };
 
-  it("entries create は single なら PUT /api/<c> に { data, status? } を送る", async () => {
+  it("entries create sends { data, status? } with PUT /api/<c> for a single collection", async () => {
     const r = recorder({ "GET /api/collections/about": about, "PUT /api/about": entry });
     await entriesCreate(r.client, "about", { data: '{"title":"私たち"}', set: ["body=hi"], publish: true });
     const put = r.calls.find((c) => c.method === "PUT")!;
@@ -249,7 +249,7 @@ describe("single collections", () => {
     expect(r.calls.filter((c) => c.method === "PUT")).toHaveLength(2);
   });
 
-  it("entries get は id 省略で single の GET /api/<c>。list で id 省略はエラー", async () => {
+  it("entries get without an id does GET /api/<c> for a single collection; without an id on a list collection it is an error", async () => {
     const r = recorder({
       "GET /api/collections/about": about, "GET /api/collections/news": newsCollection,
       "GET /api/about": { ...entry, id: "e_single" }, "GET /api/news/e1": entry,
@@ -264,7 +264,7 @@ describe("single collections", () => {
 });
 
 describe("entries update / publish", () => {
-  it("update --publish は PATCH のあとに POST publish を呼ぶ", async () => {
+  it("update --publish calls POST publish after the PATCH", async () => {
     const r = recorder({
       "PATCH /api/news/e_000000000001": entry,
       "POST /api/news/e_000000000001/publish": { ...entry, status: "published" },
@@ -277,18 +277,18 @@ describe("entries update / publish", () => {
     expect(result).toMatchObject({ status: "published" });
   });
 
-  it("update --published-at だけでも PATCH { publishedAt } を送る", async () => {
+  it("update --published-at alone still sends PATCH { publishedAt }", async () => {
     const r = recorder({ "PATCH /api/news/e1": entry });
     await entriesUpdate(r.client, ["news", "e1"], { publishedAt: "2026-01-02T00:00:00Z" });
     expect(r.calls.map((c) => `${c.method} ${c.path}`)).toEqual(["PATCH /api/news/e1"]);
     expect(r.calls[0]!.json).toEqual({ publishedAt: "2026-01-02T00:00:00Z" });
   });
 
-  it("update に変更内容が無ければエラー。publish / unpublish / delete は対応する API を呼ぶ", async () => {
+  it("update with nothing to change is an error. publish / unpublish / delete call their matching API", async () => {
     const r = recorder({
       "POST /api/news/e1/publish": entry, "POST /api/news/e1/unpublish": entry, "DELETE /api/news/e1": null,
     });
-    await expect(entriesUpdate(r.client, ["news", "e1"], {})).rejects.toThrow("更新");
+    await expect(entriesUpdate(r.client, ["news", "e1"], {})).rejects.toThrow("Nothing to update");
     await entriesPublish(r.client, ["news", "e1"], {});
     await entriesDelete(r.client, ["news", "e1"], {});
     expect(r.calls.map((c) => `${c.method} ${c.path}`)).toEqual(["POST /api/news/e1/publish", "DELETE /api/news/e1"]);
@@ -296,7 +296,7 @@ describe("entries update / publish", () => {
 });
 
 describe("media / preview", () => {
-  it("media upload は multipart で file と alt を送る（ファイル名は basename、MIME は拡張子から）", async () => {
+  it("media upload sends file and alt as multipart (the file name is the basename, the MIME type comes from the extension)", async () => {
     const r = recorder({ "POST /api/media": { id: "m_000000000001" } });
     mkdirSync(join(dir, "sub"));
     const p = join(dir, "sub", "photo.PNG");
@@ -312,7 +312,7 @@ describe("media / preview", () => {
     expect(r.calls[0]!.headers.has("content-type")).toBe(false); // fetch adds the boundary itself
   });
 
-  it("未知の拡張子は application/octet-stream。alt が無ければ送らない", async () => {
+  it("an unknown extension gives application/octet-stream. alt is not sent when missing", async () => {
     const r = recorder({ "POST /api/media": { id: "m_000000000001" } });
     await mediaUpload(r.client, file("data.zzz", "x"), {});
     const form = r.calls[0]!.body as FormData;
@@ -320,13 +320,13 @@ describe("media / preview", () => {
     expect(form.has("alt")).toBe(false);
   });
 
-  it("preview は POST して url を返す", async () => {
+  it("preview POSTs and returns the url", async () => {
     const r = recorder({ "POST /api/news/e1/preview": { url: "https://cms.test/preview/t", token: "t", expiresAt: "x" } });
     expect(await previewCmd(r.client, ["news", "e1"], {})).toMatchObject({ url: "https://cms.test/preview/t" });
     expect(r.calls[0]!.json).toBeUndefined();
   });
 
-  it("preview --ttl は ttlSeconds を送る。1..2592000 の整数でなければリクエスト前にエラー", async () => {
+  it("preview --ttl sends ttlSeconds. Anything other than an integer from 1 to 2592000 fails before any request", async () => {
     const r = recorder({ "POST /api/news/e1/preview": { url: "https://cms.test/preview/t", token: "t", expiresAt: "x" } });
     await previewCmd(r.client, ["news", "e1"], { ttl: "3600" });
     expect(r.calls[0]!.json).toEqual({ ttlSeconds: 3600 });
@@ -336,7 +336,7 @@ describe("media / preview", () => {
     expect(r.calls).toHaveLength(1);
   });
 
-  it("media upload --url は JSON { url, alt, filename } を送る。ファイルと --url はどちらか一方だけ", async () => {
+  it("media upload --url sends JSON { url, alt, filename }. A file and --url cannot be combined", async () => {
     const r = recorder({ "POST /api/media": { id: "m_000000000001" } });
     await mediaUpload(r.client, undefined, { url: "https://img.test/a.png", alt: "説明", filename: "b.png" });
     expect(r.calls[0]!.json).toEqual({ url: "https://img.test/a.png", alt: "説明", filename: "b.png" });
@@ -347,13 +347,13 @@ describe("media / preview", () => {
     expect(r.calls).toHaveLength(2);
   });
 
-  it("media upload <file> --filename は送るファイル名を変える", async () => {
+  it("media upload <file> --filename changes the file name that is sent", async () => {
     const r = recorder({ "POST /api/media": { id: "m_000000000001" } });
     await mediaUpload(r.client, file("x.png", "x"), { filename: "hero.png" });
     expect(((r.calls[0]!.body as FormData).get("file") as File).name).toBe("hero.png");
   });
 
-  it("media update --alt は PATCH /api/media/:id { alt }。--alt が無ければエラー", async () => {
+  it("media update --alt sends PATCH /api/media/:id { alt }. Without --alt it is an error", async () => {
     const r = recorder({ "PATCH /api/media/m_000000000001": { id: "m_000000000001", alt: "新" } });
     expect(await mediaUpdate(r.client, "m_000000000001", { alt: "新" })).toMatchObject({ alt: "新" });
     expect(r.calls[0]!.json).toEqual({ alt: "新" });
@@ -365,19 +365,19 @@ describe("media / preview", () => {
 });
 
 describe("trash", () => {
-  it("trash empty は --confirm を API の confirm に渡す", async () => {
+  it("trash empty passes --confirm to the API as confirm", async () => {
     const r = recorder({ "DELETE /api/trash?confirm=dev-site": { deleted: 2 } });
     expect(await trashEmpty(r.client, { confirm: "dev-site" })).toEqual({ deleted: 2 });
     expect(r.calls[0]).toMatchObject({ method: "DELETE", path: "/api/trash", search: "?confirm=dev-site" });
   });
 
-  it("reset は POST /api/reset に { confirm } を送る", async () => {
+  it("reset sends { confirm } with POST /api/reset", async () => {
     const r = recorder({ "POST /api/reset": { trashed: 3 } });
     expect(await resetCmd(r.client, { confirm: "dev-site" })).toEqual({ trashed: 3 });
     expect(r.calls[0]).toMatchObject({ method: "POST", path: "/api/reset", json: { confirm: "dev-site" } });
   });
 
-  it("reset は TTY ならプロンプトの答えを confirm にする", async () => {
+  it("on a TTY, reset uses the prompt answer as confirm", async () => {
     const r = recorder({ "POST /api/reset": { trashed: 0 } });
     const prompter = vi.fn(async () => "dev-site");
     await resetCmd(r.client, { isTTY: true, prompter });
@@ -385,13 +385,13 @@ describe("trash", () => {
     expect(r.calls[0]!.json).toEqual({ confirm: "dev-site" });
   });
 
-  it("reset は TTY でなく --confirm も無ければリクエスト前にエラー", async () => {
+  it("without a TTY and without --confirm, reset fails before any request", async () => {
     const r = recorder();
     await expect(resetCmd(r.client, { isTTY: false })).rejects.toThrow("pass --confirm <site>");
     expect(r.calls).toEqual([]);
   });
 
-  it("trash delete も confirm を渡す。restore は POST", async () => {
+  it("trash delete also passes confirm. restore is a POST", async () => {
     const r = recorder({ "DELETE /api/trash/e_1": null, "POST /api/trash/e_1/restore": entry });
     await trashDelete(r.client, "e_1", { confirm: "dev-site" });
     await trashRestore(r.client, "e_1", {});
@@ -399,7 +399,7 @@ describe("trash", () => {
     expect(r.calls[1]).toMatchObject({ method: "POST", path: "/api/trash/e_1/restore" });
   });
 
-  it("TTY でなく --confirm も無ければ、リクエスト前に 'pass --confirm <site>' でエラー", async () => {
+  it("without a TTY and without --confirm, fails before any request with 'pass --confirm <site>'", async () => {
     const r = recorder();
     const prompter = vi.fn();
     await expect(trashEmpty(r.client, { isTTY: false, prompter })).rejects.toThrow("pass --confirm <site>");
@@ -408,17 +408,17 @@ describe("trash", () => {
     expect(prompter).not.toHaveBeenCalled();
   });
 
-  it("TTY なら prompter でサイト名を聞く。取り消されたらリクエストしない", async () => {
+  it("on a TTY, asks for the site name with the prompter. Sends no request when cancelled", async () => {
     const r = recorder({ "DELETE /api/trash?confirm=my-site": { deleted: 0 } });
     await trashEmpty(r.client, { isTTY: true, prompter: async () => "my-site" });
     expect(r.calls).toHaveLength(1);
-    await expect(trashEmpty(r.client, { isTTY: true, prompter: async () => undefined })).rejects.toThrow("キャンセル");
+    await expect(trashEmpty(r.client, { isTTY: true, prompter: async () => undefined })).rejects.toThrow("Cancelled");
     expect(r.calls).toHaveLength(1);
   });
 });
 
 describe("keys", () => {
-  it("create は name と role を送る（role の既定は read）。revoke は DELETE", async () => {
+  it("create sends name and role (role defaults to read). revoke sends DELETE", async () => {
     const r = recorder({ "POST /api/keys": { key: "fcms_read_x", info: {} }, "DELETE /api/keys/k_1": { id: "k_1" } });
     await keysCreate(r.client, { name: "site" });
     await keysCreate(r.client, { name: "ops", role: "admin" });
@@ -439,7 +439,7 @@ const exportBody = (m: unknown[]) => ({
 });
 
 describe("export", () => {
-  it("data.json を書き、各 media を media/<id>-<filename> に保存する（ファイル名は無害化）", async () => {
+  it("writes data.json and saves each media file to media/<id>-<filename> (the file name is sanitized)", async () => {
     const body = exportBody([
       media("m_000000000001", "a.png", "https://cms.test/media/m_000000000001/a.png"),
       media("m_000000000002", "../../evil/..\\x\u0000y.png", "https://cms.test/media/m_000000000002/x.png"),
@@ -465,7 +465,7 @@ describe("export", () => {
     expect(dl.headers.has("authorization")).toBe(false);
   });
 
-  it("ダウンロードに失敗したら media id を示して中止し、data.json を残さない", async () => {
+  it("when a download fails, stops naming the media id and leaves no data.json", async () => {
     const r = recorder({
       "GET /api/export": exportBody([media("m_000000000001", "a.png", "https://cms.test/media/m_000000000001/a.png")]),
       "GET /media/m_000000000001/a.png": () => new Response("nope", { status: 404 }),
@@ -475,7 +475,7 @@ describe("export", () => {
     expect(existsSync(join(out, "data.json"))).toBe(false);
   });
 
-  it("--out の既定は ./femtocms-export-YYYYMMDD-HHmmss", async () => {
+  it("the default for --out is ./femtocms-export-YYYYMMDD-HHmmss", async () => {
     const r = recorder({ "GET /api/export": exportBody([]) });
     const cwd = process.cwd();
     process.chdir(dir);
@@ -499,7 +499,7 @@ describe("import", () => {
   }
   const imported = { collections: 0, entries: 0, media: 2 };
 
-  it("media/<id>-* を PUT してから、url を外した data.json を POST /api/import する", async () => {
+  it("PUTs media/<id>-* first, then POSTs data.json without the url fields to /api/import", async () => {
     const d = makeDir(
       [
         media("m_000000000001", "a.png", "https://cms.test/media/m_000000000001/a.png"),
@@ -522,7 +522,7 @@ describe("import", () => {
     expect(post.data.media[1].url).toBe("https://other.test/r.png");
   });
 
-  it("export の出力をそのまま import できる（PUT が import より先）", async () => {
+  it("the output of export can be imported as it is (the PUT comes before the import)", async () => {
     const m = media("m_000000000001", "a b.png", "https://cms.test/media/m_000000000001/a%20b.png");
     const server = recorder({
       "GET /api/export": exportBody([m]),
@@ -539,14 +539,14 @@ describe("import", () => {
 
   const root = { name: "femtocms", site: "dev-site" };
 
-  it("--replace は --confirm を mode と confirm に渡す", async () => {
+  it("--replace passes --confirm as mode and confirm", async () => {
     const d = makeDir([], {});
     const r = recorder({ "GET /": root, "POST /api/import": imported });
     await importCmd(r.client, d, { replace: true, confirm: "dev-site" });
     expect(r.calls.at(-1)!.json).toMatchObject({ mode: "replace", confirm: "dev-site" });
   });
 
-  it("--replace は GET / の site と confirm を照合し、違えばメディアの PUT も含めて何も書き込まない", async () => {
+  it("--replace compares confirm with the site from GET /, and when they differ writes nothing, including the media PUTs", async () => {
     const d = makeDir([media("m_000000000001", "a.png")], { "m_000000000001-a.png": "x" });
     const r = recorder({ "GET /": root, "PUT /api/media/m_000000000001": {}, "POST /api/import": imported });
     await expect(importCmd(r.client, d, { replace: true, confirm: "wrong" })).rejects.toThrow(/dev-site/);
@@ -557,7 +557,7 @@ describe("import", () => {
     ]);
   });
 
-  it("--replace で --confirm が無く TTY でもなければ、リクエスト前にエラー。TTY ならプロンプト", async () => {
+  it("--replace without --confirm and without a TTY fails before any request. On a TTY it prompts", async () => {
     const d = makeDir([media("m_000000000001", "a.png")], { "m_000000000001-a.png": "x" });
     const r = recorder({ "GET /": root, "PUT /api/media/m_000000000001": {}, "POST /api/import": imported });
     await expect(importCmd(r.client, d, { replace: true, isTTY: false })).rejects.toThrow("pass --confirm <site>");
@@ -566,12 +566,12 @@ describe("import", () => {
     expect(r.calls.at(-1)!.json.confirm).toBe("dev-site");
   });
 
-  it("import のヘルプは、マージでもメディアのファイルを import の呼び出しより先に送ると書く", () => {
+  it("the import help says media files are sent before the import call, even when merging", () => {
     const cmd = buildProgram().commands.find((c) => c.name() === "import")!;
-    expect(cmd.helpInformation()).toMatch(/検証より先/);
+    expect(cmd.helpInformation()).toMatch(/before\s+the\s+data\s+is\s+validated/);
   });
 
-  it("data.json が無い・壊れているときは分かるエラー", async () => {
+  it("a missing or corrupt data.json gives a clear error", async () => {
     const r = recorder();
     await expect(importCmd(r.client, join(dir, "missing"), {})).rejects.toThrow("data.json");
     const bad = join(dir, "bad");
@@ -612,7 +612,7 @@ describe("commander wiring", () => {
     total: 2, limit: 10, offset: 0,
   };
 
-  it("entries list --json は API の JSON をそのまま出す。人向けは id/slug/status/publishedAt/最初の文字列", async () => {
+  it("entries list --json prints the API JSON as it is. The human output shows id/slug/status/publishedAt/the first string", async () => {
     const r = recorder({ "GET /api/news": page });
     vi.stubGlobal("fetch", r.fetchImpl);
     await run("--json", "entries", "list", "news", "--filter", "kind=x", "--status", "all");
@@ -627,20 +627,20 @@ describe("commander wiring", () => {
     expect(text).toContain("published");
   });
 
-  it("entries list の --status ヘルプは既定が published だと書く", () => {
+  it("the --status help of entries list says the default is published", () => {
     const list = buildProgram().commands.find((c) => c.name() === "entries")!.commands.find((c) => c.name() === "list")!;
     expect(list.helpInformation()).toMatch(/published/);
-    expect(list.helpInformation()).toMatch(/既定/);
+    expect(list.helpInformation()).toMatch(/default:\s+published/);
   });
 
-  it("entries create --set / --publish は repeatable で配線される", async () => {
+  it("entries create --set / --publish are wired as repeatable options", async () => {
     const r = recorder({ "GET /api/collections/news": newsCollection, "POST /api/news": entry });
     vi.stubGlobal("fetch", r.fetchImpl);
     await run("entries", "create", "news", "--set", "title=A", "--set", "price=2", "--publish");
     expect(r.calls.find((c) => c.method === "POST")!.json).toEqual({ data: { title: "A", price: 2 }, status: "published" });
   });
 
-  it("trash empty は非 TTY で --confirm 無しならエラー終了（API を呼ばない）", async () => {
+  it("trash empty without a TTY and without --confirm exits with an error (no API call)", async () => {
     const r = recorder();
     vi.stubGlobal("fetch", r.fetchImpl);
     await expect(run("trash", "empty")).rejects.toThrow("exit 2");
@@ -648,7 +648,7 @@ describe("commander wiring", () => {
     expect(r.calls).toEqual([]);
   });
 
-  it("reset は非 TTY で --confirm 無しならエラー終了（API を呼ばない）", async () => {
+  it("reset without a TTY and without --confirm exits with an error (no API call)", async () => {
     const r = recorder();
     vi.stubGlobal("fetch", r.fetchImpl);
     await expect(run("reset")).rejects.toThrow("exit 2");
@@ -656,25 +656,25 @@ describe("commander wiring", () => {
     expect(r.calls).toEqual([]);
   });
 
-  it("reset --confirm は件数と trash empty の案内を表示し、--json は生の応答を出す", async () => {
+  it("reset --confirm prints the count and the trash empty hint, and --json prints the raw response", async () => {
     const r = recorder({ "POST /api/reset": { trashed: 4 } });
     vi.stubGlobal("fetch", r.fetchImpl);
     await run("reset", "--confirm", "dev-site");
-    expect(out.join("")).toContain("4 件");
+    expect(out.join("")).toContain("4 items");
     expect(out.join("")).toContain("femtocms trash empty --confirm <site>");
     out.length = 0;
     await run("--json", "reset", "--confirm", "dev-site");
     expect(JSON.parse(out.join(""))).toEqual({ trashed: 4 });
   });
 
-  it("keys create は作成したキーを表示する", async () => {
+  it("keys create prints the created key", async () => {
     const r = recorder({ "POST /api/keys": { key: "fcms_read_NEWKEY", info: { id: "k_1", name: "site", role: "read" } } });
     vi.stubGlobal("fetch", r.fetchImpl);
     await run("keys", "create", "--name", "site");
     expect(out.join("")).toContain("fcms_read_NEWKEY");
   });
 
-  it("--published-at / preview --ttl / media upload --url / media update が配線される", async () => {
+  it("--published-at / preview --ttl / media upload --url / media update are wired up", async () => {
     const r = recorder({
       "GET /api/collections/news": newsCollection, "POST /api/news": entry, "PATCH /api/news/e1": entry,
       "POST /api/news/e1/preview": { url: "https://cms.test/preview/tok" }, "POST /api/media": { id: "m_1", url: "u" },
@@ -693,7 +693,7 @@ describe("commander wiring", () => {
     expect(r.calls.at(-1)).toMatchObject({ method: "PATCH", path: "/api/media/m_1", json: { alt: "a" } });
   });
 
-  it("preview は URL だけを出力する", async () => {
+  it("preview prints only the URL", async () => {
     const r = recorder({ "POST /api/news/e1/preview": { url: "https://cms.test/preview/tok", token: "tok", expiresAt: "x" } });
     vi.stubGlobal("fetch", r.fetchImpl);
     await run("preview", "news", "e1");

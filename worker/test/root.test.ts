@@ -2,7 +2,7 @@ import { SELF, env } from "cloudflare:test";
 import { expect, it } from "vitest";
 import { VERSION } from "../src/version";
 
-it("GET / はサイトの自己紹介を返す", async () => {
+it("GET / returns the site introduction", async () => {
   const res = await SELF.fetch("https://cms.test/");
   expect(res.status).toBe(200);
   expect(await res.json()).toEqual({
@@ -10,12 +10,12 @@ it("GET / はサイトの自己紹介を返す", async () => {
     api: "https://cms.test/api", mcp: "https://cms.test/mcp", openapi: "https://cms.test/api/openapi.json",
   });
 });
-it("マイグレーション済みのテーブルがある", async () => {
+it("the migrated tables exist", async () => {
   const r = await env.DB.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='entries'").first();
   expect(r).not.toBeNull();
 });
 
-it("GET /embed.js は埋め込みスクリプトを JS として配信する", async () => {
+it("GET /embed.js serves the embed script as JavaScript", async () => {
   const res = await SELF.fetch("https://cms.test/embed.js");
   expect(res.status).toBe(200);
   expect(res.headers.get("Content-Type")).toBe("text/javascript; charset=utf-8");

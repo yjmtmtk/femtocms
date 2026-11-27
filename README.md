@@ -108,7 +108,7 @@ An entry has an `id` (`e_...`), an optional `slug`, a `status` (`draft` or `publ
 - New entries are **drafts**. Types, lengths and ranges are validated on every write, so an AI can fill a draft in step by step.
 - **`required` is enforced when you publish**, not when you save a draft. The error lists the missing fields.
 - Setting a field to `null` clears it.
-- Failed writes return a structured error, `{ "error": { "code", "message", "issues": [{ "path", "message", "expected", "received" }], "hint" } }`, so the caller can fix the input itself.
+- Failed writes return a structured error, `{ "error": { "code", "message", "issues": [{ "path", "message", "expected", "received" }], "hint" } }`, so the caller can fix the input itself. Messages are in English; branch on `code`, whose values are fixed, rather than on the message text.
 - Drafts are visible only with an admin key, or with a time-limited preview token (see `preview`).
 
 ### Trash

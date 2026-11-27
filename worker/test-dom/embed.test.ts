@@ -32,7 +32,7 @@ afterEach(() => {
   delete win.FEMTOCMS_BASE;
 });
 
-it("一覧を描画し、タイトルの HTML は文字として出る", async () => {
+it("renders the list, and HTML in a title appears as text", async () => {
   document.body.innerHTML = `<div data-femtocms="news" data-limit="2" data-href="/news/{slug}"></div>`;
   const fetchMock = mockItems([entry({ data: { title: "<b>x</b>" } })]);
   load();
@@ -47,7 +47,7 @@ it("一覧を描画し、タイトルの HTML は文字として出る", async (
   expect(time.getAttribute("datetime")).toBe("2026-11-26T00:00:00.000Z");
 });
 
-it("limit は 1〜100 に丸め、既定は 5。コレクション名は URL エンコードする", async () => {
+it("limit is clamped to 1-100 with a default of 5; the collection name is URL-encoded", async () => {
   document.body.innerHTML = `
     <div data-femtocms="a b"></div>
     <div data-femtocms="big" data-limit="9999"></div>
@@ -63,7 +63,7 @@ it("limit は 1〜100 に丸め、既定は 5。コレクション名は URL エ
   expect(urls).toContain("https://cms.test/api/junk?limit=5&sort=-publishedAt");
 });
 
-it("data-fields: 文字列・数値は span、日付は time、画像は明示時のみ http(s) だけ img", async () => {
+it("data-fields: strings and numbers become span, dates become time, images only when listed and only http(s) as img", async () => {
   document.body.innerHTML = `<div data-femtocms="news" data-fields="title,price,cover,evil,flag,missing,updatedAt,bad name!"></div>`;
   mockItems([entry({
     data: {
@@ -87,7 +87,7 @@ it("data-fields: 文字列・数値は span、日付は time、画像は明示�
   expect(document.querySelector("[class*='!']")).toBeNull();
 });
 
-it("既定ではデータ内の画像や任意フィールドは出さない", async () => {
+it("by default, images and arbitrary fields in data are not rendered", async () => {
   document.body.innerHTML = `<div data-femtocms="news"></div>`;
   mockItems([entry({ data: { title: "T", cover: { url: "https://cms.test/media/m_1" }, body: "secret" } })]);
   load();
@@ -96,7 +96,7 @@ it("既定ではデータ内の画像や任意フィールドは出さない", a
   expect(document.querySelector(".fcms-field-body")).toBeNull();
 });
 
-it("data-locale で日付の表示言語を変える", async () => {
+it("data-locale changes the display language of dates", async () => {
   document.body.innerHTML = `<div data-femtocms="news" data-locale="en-US"></div>`;
   mockItems([entry({ publishedAt: "2026-11-26T12:00:00.000Z" })]);
   load();
@@ -104,7 +104,7 @@ it("data-locale で日付の表示言語を変える", async () => {
   expect(document.querySelector("time.fcms-date")!.textContent).toBe(new Date("2026-11-26T12:00:00.000Z").toLocaleDateString("en-US"));
 });
 
-it("data-href: {id} も置換し、slug が無ければ id を使い、値は URL エンコードする", async () => {
+it("data-href: also substitutes {id}, falls back to id when there is no slug, and URL-encodes values", async () => {
   document.body.innerHTML = `<div data-femtocms="news" data-href="/n/{slug}?id={id}"></div>`;
   mockItems([entry({ slug: null, id: "e_x y" }), entry({ slug: "a/b" })]);
   load();
@@ -113,7 +113,7 @@ it("data-href: {id} も置換し、slug が無ければ id を使い、値は UR
   expect(hrefs).toEqual(["/n/e_x%20y?id=e_x%20y", "/n/a%2Fb?id=e_abc123def456"]);
 });
 
-it("data-href が危険なスキームならリンクなしで描画する", async () => {
+it("data-href with a dangerous scheme renders without a link", async () => {
   document.body.innerHTML = `
     <div id="a" data-femtocms="news" data-href="javascript:alert('{slug}')"></div>
     <div id="b" data-femtocms="news" data-href=" JaVa&#9;script:alert(1)"></div>
@@ -129,7 +129,7 @@ it("data-href が危険なスキームならリンクなしで描画する", asy
   expect(document.querySelector("#d a")!.getAttribute("href")).toBe("https://example.com/a");
 });
 
-it("0件で data-empty を出す。指定が無ければ何も出さない", async () => {
+it("shows data-empty when there are 0 entries; shows nothing when it is not set", async () => {
   document.body.innerHTML = `<div id="a" data-femtocms="news" data-empty="お知らせはありません"></div><div id="b" data-femtocms="news"></div>`;
   mockItems([]);
   load();
@@ -139,7 +139,7 @@ it("0件で data-empty を出す。指定が無ければ何も出さない", asy
   expect(document.querySelector("#b")!.innerHTML).toBe("");
 });
 
-it("取得失敗でも例外を投げず、要素は空のまま console.warn する", async () => {
+it("on fetch failure, does not throw, leaves the element empty and calls console.warn", async () => {
   document.body.innerHTML = `<div data-femtocms="news"></div>`;
   globalThis.fetch = vi.fn(async () => { throw new TypeError("network"); }) as unknown as typeof fetch;
   const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -149,7 +149,7 @@ it("取得失敗でも例外を投げず、要素は空のまま console.warn �
   expect(warn).toHaveBeenCalledWith("[femtocms]", expect.anything());
 });
 
-it("HTTP エラーや想定外の本文でも例外を投げず空のまま", async () => {
+it("on an HTTP error or an unexpected body, does not throw and leaves the element empty", async () => {
   document.body.innerHTML = `<div id="a" data-femtocms="nope"></div><div id="b" data-femtocms="odd"></div>`;
   globalThis.fetch = vi.fn(async (url: string) =>
     String(url).includes("/nope") ? new Response("{}", { status: 404 }) : Response.json({ nothing: true })) as unknown as typeof fetch;
@@ -162,7 +162,7 @@ it("HTTP エラーや想定外の本文でも例外を投げず空のまま", as
   expect(warn).toHaveBeenCalledWith("[femtocms]", expect.objectContaining({ message: expect.stringContaining("unexpected response") }));
 });
 
-it("style は1回だけ入り、セレクタはすべて :where で詳細度 0", async () => {
+it("style is injected only once, and every selector uses :where for specificity 0", async () => {
   document.body.innerHTML = `<div data-femtocms="news"></div>`;
   mockItems([entry()]);
   load();
@@ -176,7 +176,7 @@ it("style は1回だけ入り、セレクタはすべて :where で詳細度 0",
   for (const s of selectors) expect(s).toMatch(/^:where\(.+\)$/);
 });
 
-it("refresh を重ねて呼んでも一覧は重複しない", async () => {
+it("calling refresh repeatedly does not duplicate the list", async () => {
   document.body.innerHTML = `<div data-femtocms="news"></div>`;
   mockItems([entry(), entry({ id: "e_2", slug: "b" })]);
   load();
@@ -186,7 +186,7 @@ it("refresh を重ねて呼んでも一覧は重複しない", async () => {
   expect(document.querySelectorAll("ul.fcms-list").length).toBe(1);
 });
 
-it("後から追加した要素も refresh で描画される", async () => {
+it("elements added later are also rendered by refresh", async () => {
   mockItems([entry()]);
   load();
   await win.femtocms.refresh();
@@ -195,14 +195,14 @@ it("後から追加した要素も refresh で描画される", async () => {
   expect(document.querySelectorAll("li.fcms-item").length).toBe(1);
 });
 
-it("グローバルに増えるのは window.femtocms だけ", async () => {
+it("the only global added is window.femtocms", async () => {
   const before = new Set(Object.getOwnPropertyNames(win));
   load();
   const added = Object.getOwnPropertyNames(win).filter((k) => !before.has(k));
   expect(added).toEqual(["femtocms"]);
 });
 
-it("ベース URL が決まらなければ警告だけ出して何もしない", async () => {
+it("when the base URL cannot be determined, only warns and does nothing", async () => {
   delete win.FEMTOCMS_BASE;
   document.body.innerHTML = `<div data-femtocms="news"></div>`;
   const fetchMock = mockItems([entry()]);
@@ -213,7 +213,7 @@ it("ベース URL が決まらなければ警告だけ出して何もしない",
   expect(warn).toHaveBeenCalled();
 });
 
-// ---- 詳細表示: [data-femtocms-entry] ----
+// ---- Detail view: [data-femtocms-entry] ----
 
 function setPageUrl(url: string): void {
   if (win.happyDOM?.setURL) win.happyDOM.setURL(url);
@@ -230,7 +230,7 @@ const detail = entry({
   html: { body: "<p><strong>md</strong></p>" },
 });
 
-it("詳細: URL の ?slug= の記事を取得し、タイトル・日付・本文 HTML を article に描画する", async () => {
+it("detail: fetches the entry for ?slug= in the URL and renders title, date and body HTML into an article", async () => {
   setPageUrl("https://lp.test/news.html?slug=winter-latte");
   document.body.innerHTML = `<div data-femtocms-entry="news"></div>`;
   const fetchMock = mockEntry(detail);
@@ -245,11 +245,11 @@ it("詳細: URL の ?slug= の記事を取得し、タイトル・日付・本�
   expect(article.querySelector("time.fcms-date")!.getAttribute("datetime")).toBe("2026-11-26T00:00:00.000Z");
   const body = article.querySelector(".fcms-body.fcms-field-body")!;
   expect(body.innerHTML).toBe("<p><strong>md</strong></p>");
-  // 既定では画像などは出さない
+  // images and the like are not rendered by default
   expect(article.querySelector("img")).toBeNull();
 });
 
-it("詳細: data-slug が URL より優先され、slug は URL エンコードされる", async () => {
+it("detail: data-slug takes precedence over the URL, and the slug is URL-encoded", async () => {
   setPageUrl("https://lp.test/news.html?slug=ignored");
   document.body.innerHTML = `<div data-femtocms-entry="news" data-slug="a b/c"></div>`;
   const fetchMock = mockEntry(detail);
@@ -258,7 +258,7 @@ it("詳細: data-slug が URL より優先され、slug は URL エンコード�
   expect(fetchMock).toHaveBeenCalledWith("https://cms.test/api/news/a%20b%2Fc", { credentials: "omit" });
 });
 
-it("詳細: data-param で URL パラメータ名を変えられる", async () => {
+it("detail: data-param changes the URL parameter name", async () => {
   setPageUrl("https://lp.test/news.html?id=e_abc123def456");
   document.body.innerHTML = `<div data-femtocms-entry="news" data-param="id"></div>`;
   const fetchMock = mockEntry(detail);
@@ -267,7 +267,7 @@ it("詳細: data-param で URL パラメータ名を変えられる", async () =
   expect(fetchMock).toHaveBeenCalledWith("https://cms.test/api/news/e_abc123def456", { credentials: "omit" });
 });
 
-it("詳細: ページ URL の preview トークンを API に渡す（下書きを LP のデザインで確認できる）", async () => {
+it("detail: passes the preview token from the page URL to the API (a draft can be checked in the landing page's design)", async () => {
   setPageUrl("https://lp.test/news.html?slug=winter-latte&preview=tok.en");
   document.body.innerHTML = `<div data-femtocms-entry="news"></div>`;
   const fetchMock = mockEntry(detail);
@@ -276,7 +276,7 @@ it("詳細: ページ URL の preview トークンを API に渡す（下書き�
   expect(fetchMock).toHaveBeenCalledWith("https://cms.test/api/news/winter-latte?preview=tok.en", { credentials: "omit" });
 });
 
-it("詳細: data-fields と data-heading で項目と見出しの要素を変えられる。画像は明示時のみ http(s)", async () => {
+it("detail: data-fields and data-heading change the fields and the heading element; images only when listed and only http(s)", async () => {
   setPageUrl("https://lp.test/news.html?slug=winter-latte");
   document.body.innerHTML = `<div data-femtocms-entry="news" data-fields="cover,title" data-heading="h2"></div>`;
   mockEntry(detail);
@@ -289,7 +289,7 @@ it("詳細: data-fields と data-heading で項目と見出しの要素を変え
   expect(article.querySelector(".fcms-body")).toBeNull();
 });
 
-it("詳細: data-heading に見出し以外を指定されたら h1 にする", async () => {
+it("detail: a data-heading that is not a heading falls back to h1", async () => {
   setPageUrl("https://lp.test/news.html?slug=winter-latte");
   document.body.innerHTML = `<div data-femtocms-entry="news" data-heading="script"></div>`;
   mockEntry(detail);
@@ -299,7 +299,7 @@ it("詳細: data-heading に見出し以外を指定されたら h1 にする", 
   expect(document.querySelector("h1.fcms-title")).not.toBeNull();
 });
 
-it("詳細: 404 や、slug 未指定で一覧のコレクションだったときは data-empty を出し、例外を投げない", async () => {
+it("detail: shows data-empty on a 404, or when no slug is given and the collection is a list, and does not throw", async () => {
   setPageUrl("https://lp.test/news.html?slug=nope");
   document.body.innerHTML = `
     <div id="a" data-femtocms-entry="news" data-empty="記事が見つかりません"></div>`;
@@ -318,7 +318,7 @@ it("詳細: 404 や、slug 未指定で一覧のコレクションだったと�
   expect(document.querySelector("#b article")).toBeNull();
 });
 
-it("詳細: data-document-title を付けるとページのタイトルを記事タイトルにする", async () => {
+it("detail: data-document-title sets the page title to the entry title", async () => {
   setPageUrl("https://lp.test/news.html?slug=winter-latte");
   document.title = "Café";
   document.body.innerHTML = `<div data-femtocms-entry="news" data-document-title></div>`;
@@ -328,7 +328,7 @@ it("詳細: data-document-title を付けるとページのタイトルを記事
   expect(document.title).toBe("<i>冬</i>のラテ | Café");
 });
 
-it("一覧と詳細が同じページにあっても両方描画する", async () => {
+it("renders both a list and a detail on the same page", async () => {
   setPageUrl("https://lp.test/news.html?slug=winter-latte");
   document.body.innerHTML = `<div data-femtocms="news"></div><div data-femtocms-entry="news"></div>`;
   globalThis.fetch = vi.fn(async (url: string) =>
@@ -339,7 +339,7 @@ it("一覧と詳細が同じページにあっても両方描画する", async (
   expect(document.querySelector("article.fcms-entry")).not.toBeNull();
 });
 
-// ---- ページ送りと絞り込み ----
+// ---- Paging and filtering ----
 
 function mockPaged(total: number) {
   const fn = vi.fn(async (url: string) => {
@@ -355,7 +355,7 @@ function mockPaged(total: number) {
 }
 const titles = () => [...document.querySelectorAll(".fcms-title")].map((n: any) => n.textContent);
 
-it("data-filter を filter[...] に変換して API に渡す", async () => {
+it("converts data-filter to filter[...] and passes it to the API", async () => {
   setPageUrl("https://lp.test/");
   document.body.innerHTML = `<div data-femtocms="news" data-filter="category=menu&price[gte]=1000"></div>`;
   const fetchMock = mockItems([]);
@@ -366,7 +366,7 @@ it("data-filter を filter[...] に変換して API に渡す", async () => {
   expect(u.searchParams.get("filter[price][gte]")).toBe("1000");
 });
 
-it("pages: URL の ?page= から offset を決め、ページ番号のナビを出す", async () => {
+it("pages: derives offset from ?page= in the URL and renders a page-number nav", async () => {
   setPageUrl("https://lp.test/news-list.html?page=2&x=1");
   document.body.innerHTML = `<div data-femtocms="news" data-limit="3" data-pager="pages"></div>`;
   const fetchMock = mockPaged(11);
@@ -380,14 +380,14 @@ it("pages: URL の ?page= から offset を決め、ページ番号のナビを�
   const current = nav.querySelector("[aria-current=page]")!;
   expect(current.textContent).toBe("2");
   const hrefs = [...nav.querySelectorAll("a")].map((a: any) => a.getAttribute("href"));
-  expect(hrefs).toContain("?page=1&x=1"); // 前へ と 1
-  expect(hrefs).toContain("?page=3&x=1"); // 次へ と 3
+  expect(hrefs).toContain("?page=1&x=1"); // previous and 1
+  expect(hrefs).toContain("?page=3&x=1"); // next and 3
   expect(hrefs).toContain("?page=4&x=1");
   expect(nav.querySelector(".fcms-pager-prev")).not.toBeNull();
   expect(nav.querySelector(".fcms-pager-next")).not.toBeNull();
 });
 
-it("pages: 1ページ目は「前へ」なし、最後のページは「次へ」なし、1ページしかなければナビなし", async () => {
+it("pages: no \"previous\" on the first page, no \"next\" on the last page, and no nav when there is only one page", async () => {
   setPageUrl("https://lp.test/list.html");
   document.body.innerHTML = `<div data-femtocms="news" data-limit="3" data-pager="pages"></div>`;
   mockPaged(11);
@@ -407,7 +407,7 @@ it("pages: 1ページ目は「前へ」なし、最後のページは「次へ�
   expect(document.querySelector("nav.fcms-pager")).toBeNull();
 });
 
-it("pages: ページ数が多いと前後だけ出して … で省略する。不正な page は 1 として扱う", async () => {
+it("pages: with many pages, shows only the neighbors and abbreviates with …; an invalid page is treated as 1", async () => {
   setPageUrl("https://lp.test/list.html?page=10");
   document.body.innerHTML = `<div data-femtocms="news" data-limit="1" data-pager="pages"></div>`;
   mockPaged(20);
@@ -422,7 +422,7 @@ it("pages: ページ数が多いと前後だけ出して … で省略する。�
   expect(new URL(String((fetchMock.mock.calls[0] as unknown[])[0])).searchParams.get("offset")).toBe("0");
 });
 
-it("pages: data-page-param で URL パラメータ名を変えられ、範囲外のページは data-empty", async () => {
+it("pages: data-page-param changes the URL parameter name, and an out-of-range page shows data-empty", async () => {
   setPageUrl("https://lp.test/list.html?p=9");
   document.body.innerHTML = `<div data-femtocms="news" data-limit="3" data-pager="pages" data-page-param="p" data-empty="ありません"></div>`;
   mockPaged(5);
@@ -433,7 +433,7 @@ it("pages: data-page-param で URL パラメータ名を変えられ、範囲外
   expect(hrefs).toContain("?p=1");
 });
 
-it("more: 「もっと見る」で続きを追加し、全部読んだらボタンを消す", async () => {
+it("more: \"Load more\" appends the next entries and removes the button once everything is loaded", async () => {
   setPageUrl("https://lp.test/");
   document.documentElement.lang = "ja";
   document.body.innerHTML = `<div data-femtocms="news" data-limit="4" data-pager="more"></div>`;
@@ -455,7 +455,7 @@ it("more: 「もっと見る」で続きを追加し、全部読んだらボタ�
   document.documentElement.lang = "";
 });
 
-it("more: ボタンのクリックで読み込み、data-more-label で文言を変えられる", async () => {
+it("more: clicking the button loads more, and data-more-label changes the label", async () => {
   setPageUrl("https://lp.test/");
   document.body.innerHTML = `<div data-femtocms="news" data-limit="2" data-pager="more" data-more-label="Load more news"></div>`;
   mockPaged(3);
@@ -468,7 +468,7 @@ it("more: ボタンのクリックで読み込み、data-more-label で文言を
   expect(document.querySelector("button.fcms-more")).toBeNull();
 });
 
-it("more: 全件が1ページに収まればボタンを出さない。取得失敗でもボタンは残り例外を投げない", async () => {
+it("more: no button when everything fits on one page; on fetch failure the button stays and nothing throws", async () => {
   setPageUrl("https://lp.test/");
   document.body.innerHTML = `<div data-femtocms="news" data-limit="5" data-pager="more"></div>`;
   mockPaged(3);
@@ -488,12 +488,12 @@ it("more: 全件が1ページに収まればボタンを出さない。取得失
   expect(titles().length).toBe(5);
 });
 
-// ---- テンプレート: <template> で見た目を自由に決める ----
+// ---- Templates: <template> lets you decide the look freely ----
 
 const q = (sel: string) => document.querySelector(sel) as any;
 const qa = (sel: string) => [...document.querySelectorAll(sel)] as any[];
 
-it("テンプレート: 一覧を記事ごとに複製して div.fcms-items に入れ、値は文字として入れる", async () => {
+it("template: clones the list per entry into div.fcms-items, inserting values as text", async () => {
   setPageUrl("https://lp.test/");
   document.body.innerHTML = `<div data-femtocms="news" data-href="/ignored/{slug}"><template>
     <article class="card"><h3 data-field="title"></h3><span class="price" data-field="price"></span></article>
@@ -511,7 +511,7 @@ it("テンプレート: 一覧を記事ごとに複製して div.fcms-items に�
   expect(q("template")).toBeNull();
 });
 
-it("テンプレート: 中身が <li> なら ul.fcms-items で包む", async () => {
+it("template: wraps in ul.fcms-items when the content is <li>", async () => {
   setPageUrl("https://lp.test/");
   document.body.innerHTML = `<div data-femtocms="news"><template><li data-field="title"></li></template></div>`;
   mockItems([entry()]);
@@ -520,7 +520,7 @@ it("テンプレート: 中身が <li> なら ul.fcms-items で包む", async ()
   expect(q("ul.fcms-items > li").textContent).toBe("Hello");
 });
 
-it("テンプレート: img には src・alt・幅高さ・lazy を入れ、値が無い・危険な URL の img は消す", async () => {
+it("template: img gets src, alt, width/height and lazy; an img with no value or a dangerous URL is removed", async () => {
   setPageUrl("https://lp.test/");
   document.body.innerHTML = `<div data-femtocms="news"><template>
     <div class="c"><img class="thumb" data-field="cover"><img class="keep" data-field="cover" alt="固定" loading="eager"></div>
@@ -546,7 +546,7 @@ it("テンプレート: img には src・alt・幅高さ・lazy を入れ、値�
   expect(cards[2].querySelector("img")).toBeNull();
 });
 
-it("テンプレート: <time> には datetime 属性と読みやすい日付を入れる（data 内の日時も）", async () => {
+it("template: <time> gets a datetime attribute and a readable date (also for datetimes inside data)", async () => {
   setPageUrl("https://lp.test/");
   document.body.innerHTML = `<div data-femtocms="news" data-locale="en-US"><template>
     <p><time class="pub" data-field="publishedAt"></time><time class="ev" data-field="eventAt"></time><span class="raw" data-field="publishedAt"></span></p>
@@ -561,7 +561,7 @@ it("テンプレート: <time> には datetime 属性と読みやすい日付を
   expect(q(".raw").textContent).toBe("2026-11-26T00:00:00.000Z");
 });
 
-it("テンプレート: Markdown 項目はサーバーで変換済みの HTML を入れ、複数選択は「, 」でつなぐ", async () => {
+it("template: Markdown fields get HTML converted by the server, and multi-selects are joined with \", \"", async () => {
   setPageUrl("https://lp.test/");
   document.body.innerHTML = `<div data-femtocms="news"><template>
     <div class="c"><div class="body" data-field="body"></div><span class="tags" data-field="tags"></span><span class="obj" data-field="meta"></span><span class="flag" data-field="soldOut">x</span></div>
@@ -575,7 +575,7 @@ it("テンプレート: Markdown 項目はサーバーで変換済みの HTML �
   expect(q(".flag").textContent).toBe("");
 });
 
-it("テンプレート: data-if は空・false・null・[] で要素ごと消し、0 は残す。! で反転する", async () => {
+it("template: data-if removes the element for empty, false, null and []; 0 is kept; ! inverts", async () => {
   setPageUrl("https://lp.test/");
   document.body.innerHTML = `<div data-femtocms="news"><template>
     <div class="c"><b class="sold" data-if="soldOut">売り切れ</b><b class="open" data-if="!soldOut">販売中</b>
@@ -600,7 +600,7 @@ it("テンプレート: data-if は空・false・null・[] で要素ごと消し
   expect(b.querySelector(".tags")).not.toBeNull();
 });
 
-it("テンプレート: data-class は「項目名-値」を付け、true なら項目名、記号は取り除く", async () => {
+it("template: data-class adds \"field-value\", adds the field name when true, and strips symbols", async () => {
   setPageUrl("https://lp.test/");
   document.body.innerHTML = `<div data-femtocms="news"><template>
     <div class="c" data-class="category soldOut tags weird"></div>
@@ -613,7 +613,7 @@ it("テンプレート: data-class は「項目名-値」を付け、true なら
   expect(cls.length).toBe(6);
 });
 
-it("テンプレート: data-href は {項目名} を URL エンコードして入れ、危険なリンクは付けない", async () => {
+it("template: data-href substitutes URL-encoded {field} values and does not attach dangerous links", async () => {
   setPageUrl("https://lp.test/");
   document.body.innerHTML = `<div data-femtocms="news"><template>
     <div class="c"><a class="ok" data-href="news.html?slug={slug}&c={category}&id={id}">x</a><a class="bad" data-href="javascript:{slug}">y</a></div>
@@ -627,7 +627,7 @@ it("テンプレート: data-href は {項目名} を URL エンコードして�
   expect(b.querySelector(".ok").getAttribute("href")).toBe("news.html?slug=e_000000000002&c=&id=e_000000000002");
 });
 
-it("テンプレート: data-each で list 型を繰り返し、入れ子もでき、中では各要素の項目を読む", async () => {
+it("template: data-each repeats a list field, can be nested, and reads each item's fields inside", async () => {
   setPageUrl("https://lp.test/");
   document.body.innerHTML = `<div data-femtocms-entry="pricing" data-slug="pricing"><template>
     <section><h2 data-field="title"></h2>
@@ -649,7 +649,7 @@ it("テンプレート: data-each で list 型を繰り返し、入れ子もで�
   expect(q("template")).toBeNull();
 });
 
-it("テンプレート: data-each の中で data-field=\".\" は要素そのもの（複数画像のギャラリー）", async () => {
+it("template: inside data-each, data-field=\".\" is the item itself (a gallery of multiple images)", async () => {
   setPageUrl("https://lp.test/");
   document.body.innerHTML = `<div data-femtocms-entry="shop" data-slug="s"><template>
     <div class="g"><template data-each="photos"><img data-field="."></template></div>
@@ -660,7 +660,7 @@ it("テンプレート: data-each の中で data-field=\".\" は要素そのも�
   expect(qa(".g img").map((i) => i.getAttribute("src"))).toEqual(["https://cms.test/media/m_1/a.png", "https://cms.test/media/m_2/b.png"]);
 });
 
-it("テンプレート: author.name のような書き方を見つけたら expand を自動で付け、展開された記事の中身を出す", async () => {
+it("template: when it finds something like author.name, adds expand automatically and renders the expanded entry's content", async () => {
   setPageUrl("https://lp.test/");
   document.body.innerHTML = `<div data-femtocms="news"><template>
     <div class="c"><span class="who" data-field="author.name"></span><img data-field="author.photo">
@@ -681,7 +681,7 @@ it("テンプレート: author.name のような書き方を見つけたら expa
   expect(q(".rel").getAttribute("href")).toBe("?slug=r1");
 });
 
-it("テンプレート: 展開できなかった参照（ID のまま）は空にしてコンソールに警告する", async () => {
+it("template: a reference that could not be expanded (left as an ID) is emptied and warns on the console", async () => {
   setPageUrl("https://lp.test/");
   const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
   document.body.innerHTML = `<div data-femtocms="news"><template><span class="who" data-field="author.name">?</span></template></div>`;
@@ -692,7 +692,7 @@ it("テンプレート: 展開できなかった参照（ID のまま）は空�
   expect(warn).toHaveBeenCalled();
 });
 
-it("テンプレート: 項目名がプロトタイプの名前でも何も出さない", async () => {
+it("template: a field name that is a prototype property name renders nothing", async () => {
   setPageUrl("https://lp.test/");
   document.body.innerHTML = `<div data-femtocms="news"><template><span class="p" data-field="constructor"></span><span class="q" data-field="title.length"></span></template></div>`;
   mockItems([entry()]);
@@ -702,7 +702,7 @@ it("テンプレート: 項目名がプロトタイプの名前でも何も出�
   expect(q(".q").textContent).toBe("");
 });
 
-it("テンプレート: refresh し直してもテンプレートを覚えていて同じ形で描画する", async () => {
+it("template: remembers the template across refresh and renders in the same shape", async () => {
   setPageUrl("https://lp.test/");
   document.body.innerHTML = `<div data-femtocms="news"><template><p class="t" data-field="title"></p></template></div>`;
   mockItems([entry()]);
@@ -713,7 +713,7 @@ it("テンプレート: refresh し直してもテンプレートを覚えてい
   expect(q("ul.fcms-list")).toBeNull();
 });
 
-it("テンプレート: もっと見るでも同じテンプレートで追加し、expand も渡す", async () => {
+it("template: load more appends with the same template and also passes expand", async () => {
   setPageUrl("https://lp.test/");
   document.body.innerHTML = `<div data-femtocms="news" data-limit="2" data-pager="more"><template><p class="t"><span data-field="title"></span><span data-field="author.name"></span></p></template></div>`;
   const fetchMock = mockPaged(5);
@@ -726,7 +726,7 @@ it("テンプレート: もっと見るでも同じテンプレートで追加�
   expect(u.searchParams.get("expand")).toBe("author");
 });
 
-it("テンプレート: 記事ページでも使え、expand と preview を渡し、タブの題名も変えられる", async () => {
+it("template: works on an entry page too, passes expand and preview, and can change the tab title", async () => {
   setPageUrl("https://lp.test/news.html?slug=winter-latte&preview=tok");
   document.title = "Cafe";
   document.body.innerHTML = `<div data-femtocms-entry="news" data-document-title><template>
@@ -745,7 +745,7 @@ it("テンプレート: 記事ページでも使え、expand と preview を渡�
   expect(document.title).toBe("<i>冬</i>のラテ | Cafe");
 });
 
-it("テンプレート: 記事が見つからなければ data-empty を出す", async () => {
+it("template: shows data-empty when the entry is not found", async () => {
   setPageUrl("https://lp.test/news.html?slug=nope");
   document.body.innerHTML = `<div data-femtocms-entry="news" data-empty="ありません"><template><h1 data-field="title"></h1></template></div>`;
   mockEntry({ error: { code: "not_found" } }, 404);
@@ -754,7 +754,7 @@ it("テンプレート: 記事が見つからなければ data-empty を出す",
   expect(q(".fcms-empty").textContent).toBe("ありません");
 });
 
-it("テンプレート: ページ番号でも使え、ナビは .fcms-items のあとに出る", async () => {
+it("template: works with page numbers too, and the nav comes after .fcms-items", async () => {
   setPageUrl("https://lp.test/list.html?page=2");
   document.body.innerHTML = `<div data-femtocms="news" data-limit="2" data-pager="pages"><template><p class="t" data-field="title"></p></template></div>`;
   mockPaged(5);
@@ -766,7 +766,7 @@ it("テンプレート: ページ番号でも使え、ナビは .fcms-items の�
   expect(q(".fcms-pager-current").textContent).toBe("2");
 });
 
-// ---- ページ送りのテンプレート: <template data-pager> ----
+// ---- Pager template: <template data-pager> ----
 
 const PAGES_TPL = `<template data-pager>
   <nav class="my">
@@ -778,7 +778,7 @@ const PAGES_TPL = `<template data-pager>
   </nav>
 </template>`;
 
-it("ページ送りテンプレート: ページ番号を自分の HTML で出し、リンク先はほかの URL パラメータを残す", async () => {
+it("pager template: renders page numbers with your own HTML, and links keep the other URL parameters", async () => {
   setPageUrl("https://lp.test/list.html?page=2&x=1");
   document.body.innerHTML = `<div data-femtocms="news" data-limit="2" data-pager="pages"><template><p class="t" data-field="title"></p></template>${PAGES_TPL}</div>`;
   mockPaged(9);
@@ -806,7 +806,7 @@ it("ページ送りテンプレート: ページ番号を自分の HTML で出�
   expect(q("template")).toBeNull();
 });
 
-it("ページ送りテンプレート: 前後がなければリンクを外して aria-disabled を付け、多いときは … を出す", async () => {
+it("pager template: removes the link and adds aria-disabled when there is no prev/next, and shows … when there are many pages", async () => {
   setPageUrl("https://lp.test/list.html");
   document.body.innerHTML = `<div data-femtocms="news" data-limit="2" data-pager="pages" data-page-param="p">${PAGES_TPL}</div>`;
   mockPaged(40);
@@ -829,7 +829,7 @@ it("ページ送りテンプレート: 前後がなければリンクを外し�
   expect(qa(".fcms-pager-custom").length).toBe(1);
 });
 
-it("ページ送りテンプレート: 1ページに収まるときは出さない", async () => {
+it("pager template: not rendered when everything fits on one page", async () => {
   setPageUrl("https://lp.test/list.html");
   document.body.innerHTML = `<div data-femtocms="news" data-limit="5" data-pager="pages">${PAGES_TPL}</div>`;
   mockPaged(3);
@@ -839,7 +839,7 @@ it("ページ送りテンプレート: 1ページに収まるときは出さな�
   expect(q("nav")).toBeNull();
 });
 
-it("ページ送りテンプレート: data-more のボタンで追加し、残り件数を更新し、読み込み中は押せず、全部出たら消える", async () => {
+it("pager template: a data-more button appends, updates the remaining count, cannot be pressed while loading, and disappears when all are shown", async () => {
   setPageUrl("https://lp.test/");
   document.body.innerHTML = `<div data-femtocms="news" data-limit="2" data-pager="more">
     <template><p class="t" data-field="title"></p></template>
@@ -862,7 +862,7 @@ it("ページ送りテンプレート: data-more のボタンで追加し、残�
   expect(q("button.mine")).toBeNull();
 });
 
-it("ページ送りテンプレート: data-more がリンクでもページ移動せずに追加する", async () => {
+it("pager template: a data-more link appends without navigating to another page", async () => {
   setPageUrl("https://lp.test/");
   document.body.innerHTML = `<div data-femtocms="news" data-limit="2" data-pager="more"><template data-pager><a class="m" href="#more" data-more>more</a></template></div>`;
   mockPaged(3);
@@ -875,7 +875,7 @@ it("ページ送りテンプレート: data-more がリンクでもページ移�
 });
 
 
-// ---- 前後の記事・空・エラー・並び順・single ----
+// ---- Prev/next, empty, error, sort order, single ----
 
 function mockRouter(route: (u: URL) => unknown) {
   const fn = vi.fn(async (url: string) => {
@@ -898,7 +898,7 @@ function neighbors(opts: { older?: unknown; newer?: unknown; current?: unknown }
   });
 }
 
-it("前後の記事: data-prevnext で、公開日が1つ前（古い）と1つ後（新しい）の記事へのリンクを出す", async () => {
+it("prev/next: data-prevnext renders links to the entry published just before (older) and just after (newer)", async () => {
   setPageUrl("https://lp.test/news.html?slug=middle&x=1&preview=tok");
   document.body.innerHTML = `<div data-femtocms-entry="news" data-prevnext></div>`;
   const fetchMock = neighbors({ current: { ...middle } });
@@ -927,7 +927,7 @@ it("前後の記事: data-prevnext で、公開日が1つ前（古い）と1つ�
   expect(next.textContent).toContain("新しい記事");
 });
 
-it("前後の記事: 片方しかなければ片方だけ、どちらもなければ何も出さない。下書きでは探さない", async () => {
+it("prev/next: only one side if only one exists, nothing if neither exists; does not look for neighbors on a draft", async () => {
   setPageUrl("https://lp.test/news.html?slug=middle");
   document.body.innerHTML = `<div data-femtocms-entry="news" data-prevnext></div>`;
   neighbors({ newer: null });
@@ -946,7 +946,7 @@ it("前後の記事: 片方しかなければ片方だけ、どちらもなけ�
   expect(q("nav.fcms-prevnext")).toBeNull();
 });
 
-it("前後の記事: data-href があればその形のリンクにし、data-filter で探す範囲を絞る", async () => {
+it("prev/next: with data-href the links take that shape, and data-filter narrows the search range", async () => {
   setPageUrl("https://lp.test/news.html?slug=middle");
   document.body.innerHTML = `<div data-femtocms-entry="news" data-prevnext data-href="/news/{slug}" data-filter="category=menu"></div>`;
   const fetchMock = neighbors();
@@ -958,7 +958,7 @@ it("前後の記事: data-href があればその形のリンクにし、data-fi
   expect(lt.searchParams.get("filter[category]")).toBe("menu");
 });
 
-it("前後の記事: <template data-prevnext> で自分の HTML にでき、data-page でリンク、prev / next で中身を読む", async () => {
+it("prev/next: <template data-prevnext> allows your own HTML, data-page makes the link, and prev / next read the content", async () => {
   setPageUrl("https://lp.test/news.html?slug=middle");
   document.body.innerHTML = `<div data-femtocms-entry="news">
     <template><h1 data-field="title"></h1></template>
@@ -980,7 +980,7 @@ it("前後の記事: <template data-prevnext> で自分の HTML にでき、data
   expect(q("template")).toBeNull();
 });
 
-it("空のテンプレート: <template data-empty> があれば、0件や見つからないときにそれを出す", async () => {
+it("empty template: <template data-empty> is shown for 0 entries or when not found", async () => {
   setPageUrl("https://lp.test/news.html?slug=nope");
   document.body.innerHTML = `
     <div id="l" data-femtocms="news" data-empty="使われない"><template><p data-field="title"></p></template><template data-empty><p class="none">まだありません <a href="/">トップへ</a></p></template></div>
@@ -994,7 +994,7 @@ it("空のテンプレート: <template data-empty> があれば、0件や見つ
   expect(q("template")).toBeNull();
 });
 
-it("エラーのテンプレート: 読み込みに失敗したら <template data-error> を出す。中に書いた読み込み中の表示は描画で消える", async () => {
+it("error template: <template data-error> is shown when loading fails; a loading indicator written inside is removed on render", async () => {
   setPageUrl("https://lp.test/news.html?slug=a");
   vi.spyOn(console, "warn").mockImplementation(() => {});
   document.body.innerHTML = `
@@ -1011,7 +1011,7 @@ it("エラーのテンプレート: 読み込みに失敗したら <template dat
   expect(q("#ok .fcms-title").textContent).toBe("Hello");
 });
 
-it("data-sort で並び順を変え、もっと見るでも同じ順で読む。書式が不正なら既定に戻して警告する", async () => {
+it("data-sort changes the order, and load more reads in the same order; an invalid format falls back to the default and warns", async () => {
   setPageUrl("https://lp.test/");
   const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
   document.body.innerHTML = `
@@ -1029,7 +1029,7 @@ it("data-sort で並び順を変え、もっと見るでも同じ順で読む。
   expect(warn).toHaveBeenCalled();
 });
 
-it("single のコレクション: slug を書かなければコレクションの1件を表示する", async () => {
+it("single collection: without a slug, shows the collection's one entry", async () => {
   setPageUrl("https://lp.test/about.html");
   document.body.innerHTML = `<div data-femtocms-entry="about"><template><h1 data-field="title"></h1><span data-field="owner.name"></span></template></div>`;
   const fetchMock = mockRouter(() => entry({ slug: null, data: { title: "会社概要" } }));
@@ -1041,7 +1041,7 @@ it("single のコレクション: slug を書かなければコレクション�
   expect(q("h1").textContent).toBe("会社概要");
 });
 
-it("テンプレートの役割は属性で決まり、並び順に関係ない", async () => {
+it("the role of a template is decided by its attributes, regardless of order", async () => {
   setPageUrl("https://lp.test/");
   document.body.innerHTML = `<div data-femtocms="news" data-limit="1" data-pager="more">
     <template data-error><p class="err">e</p></template>
@@ -1058,9 +1058,9 @@ it("テンプレートの役割は属性で決まり、並び順に関係ない"
   expect(q(".none")).toBeNull();
 });
 
-// ---- レビューでの指摘 ----
+// ---- Review findings ----
 
-it("安全: json 項目や list の中に記事の形をしたデータがあっても、html は HTML として入れない", async () => {
+it("safety: even if json fields or lists contain entry-shaped data, html is not inserted as HTML", async () => {
   setPageUrl("https://lp.test/");
   const forged = { data: { x: "a" }, html: { x: "<img src=x onerror=alert(1)>" } };
   document.body.innerHTML = `<div data-femtocms="news"><template>
@@ -1081,7 +1081,7 @@ it("安全: json 項目や list の中に記事の形をしたデータがあっ
   expect(document.querySelectorAll("img").length).toBe(0);
 });
 
-it("安全: 前後の記事（API が返した記事）の Markdown は HTML として入る", async () => {
+it("safety: Markdown of prev/next entries (returned by the API) is inserted as HTML", async () => {
   setPageUrl("https://lp.test/news.html?slug=middle");
   document.body.innerHTML = `<div data-femtocms-entry="news"><template><h1 data-field="title"></h1></template>
     <template data-prevnext><div class="pb" data-field="prev.body"></div></template></div>`;
@@ -1091,7 +1091,7 @@ it("安全: 前後の記事（API が返した記事）の Markdown は HTML と
   expect(q(".pb").innerHTML).toBe("<p><strong>o</strong></p>");
 });
 
-it("data-document-title: 描画し直してもタイトルが重ならず、見つからないときは元に戻す", async () => {
+it("data-document-title: titles do not pile up on re-render, and the original is restored when not found", async () => {
   setPageUrl("https://lp.test/news.html?slug=a");
   document.title = "Cafe";
   document.body.innerHTML = `<div data-femtocms-entry="news" data-document-title></div>`;
@@ -1108,7 +1108,7 @@ it("data-document-title: 描画し直してもタイトルが重ならず、見�
   expect(document.title).toBe("Cafe");
 });
 
-it("ページ送りテンプレート: ページ数を超えたページでは prev が最後のページを指す（標準と同じ）", async () => {
+it("pager template: on a page beyond the page count, prev points at the last page (same as the default)", async () => {
   setPageUrl("https://lp.test/list.html?page=9");
   document.body.innerHTML = `<div data-femtocms="news" data-limit="2" data-pager="pages">${PAGES_TPL}</div>`;
   mockPaged(5);
@@ -1119,7 +1119,7 @@ it("ページ送りテンプレート: ページ数を超えたページでは p
 });
 
 
-it("安全: サーバーが expanded に挙げた参照先の記事は、その Markdown を HTML として入れる（data-each の中も）", async () => {
+it("safety: for references the server listed in expanded, their Markdown is inserted as HTML (also inside data-each)", async () => {
   setPageUrl("https://lp.test/");
   const forged = { data: { x: "a" }, html: { x: "<img src=x onerror=alert(1)>" } };
   document.body.innerHTML = `<div data-femtocms="news"><template>
@@ -1143,7 +1143,7 @@ it("安全: サーバーが expanded に挙げた参照先の記事は、その 
 });
 
 
-it("圧縮版（デプロイされる embed.js）でも同じように描画する", async () => {
+it("the minified build (the deployed embed.js) renders the same way", async () => {
   // @ts-expect-error -- plain .mjs build helper without type declarations
   const { minifyEmbed } = await import("../../scripts/minify-embed.mjs");
   const min = minifyEmbed(script) as string;

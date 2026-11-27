@@ -34,44 +34,44 @@ async function jsonObject(c: C): Promise<Record<string, unknown>> {
   try {
     body = JSON.parse(text);
   } catch {
-    throw new FemtoError("bad_request", "リクエストボディが正しい JSON ではありません", {
-      hint: 'JSON オブジェクトを送ってください (例: {"data":{...}}) 。Content-Type: application/json を付けてください',
+    throw new FemtoError("bad_request", "Request body is not valid JSON", {
+      hint: 'Send a JSON object (example: {"data":{...}}) with the header Content-Type: application/json.',
     });
   }
   if (!isObject(body)) {
-    throw new FemtoError("bad_request", "リクエストボディは JSON オブジェクトである必要があります", {
-      hint: 'ルートは配列や文字列ではなく {"..."} の形にしてください',
+    throw new FemtoError("bad_request", "Request body must be a JSON object", {
+      hint: 'The top level must be a JSON object, not an array or a string.',
     });
   }
   return body;
 }
 
-const invalid = (issues: Issue[]) => new FemtoError("validation_failed", "入力が不正です", { issues });
+const invalid = (issues: Issue[]) => new FemtoError("validation_failed", "Invalid input", { issues });
 
 function optionalStatus(body: Record<string, unknown>): Status | undefined {
   const s = body.status;
   if (s === undefined) return undefined;
   if (s === "draft" || s === "published") return s;
-  throw invalid([{ path: "status", message: 'status は "draft" か "published" です', expected: "draft | published", received: s }]);
+  throw invalid([{ path: "status", message: 'status must be "draft" or "published"', expected: "draft | published", received: s }]);
 }
 
 function optionalString(body: Record<string, unknown>, key: string): string | undefined {
   const v = body[key];
   if (v === undefined) return undefined;
   if (typeof v === "string") return v;
-  throw invalid([{ path: key, message: `${key} は文字列です`, expected: "string", received: v }]);
+  throw invalid([{ path: key, message: `${key} must be a string`, expected: "string", received: v }]);
 }
 
 function requireString(body: Record<string, unknown>, key: string): string {
   const v = optionalString(body, key);
-  if (v === undefined) throw invalid([{ path: key, message: `${key} は必須です`, expected: "string" }]);
+  if (v === undefined) throw invalid([{ path: key, message: `${key} is required`, expected: "string" }]);
   return v;
 }
 
 function checkContentLength(c: C, extra = 0): void {
   const declared = Number(c.req.header("Content-Length"));
   if (Number.isFinite(declared) && declared > MAX_MEDIA_BYTES + extra) {
-    throw new FemtoError("payload_too_large", `ファイルが大きすぎます (上限 ${MAX_MEDIA_BYTES / 1024 / 1024}MB)`);
+    throw new FemtoError("payload_too_large", `File is too large (limit ${MAX_MEDIA_BYTES / 1024 / 1024}MB)`);
   }
 }
 
@@ -110,8 +110,8 @@ api.post("/media", async (c) => {
     const form = await c.req.formData();
     const file = form.get("file");
     if (typeof file === "string" || file === null) {
-      throw new FemtoError("bad_request", 'multipart の "file" フィールドにファイルが必要です', {
-        hint: "curl -F file=@image.png -F alt=説明 のように送ってください",
+      throw new FemtoError("bad_request", 'The multipart "file" field must contain a file', {
+        hint: "Send it like this: curl -F file=@image.png -F alt=description.",
       });
     }
     const alt = form.get("alt");
@@ -137,8 +137,8 @@ api.post("/media", async (c) => {
     });
     return c.json(presentMedia(ctx, media), 201);
   }
-  throw new FemtoError("bad_request", "メディアの指定がありません", {
-    hint: 'multipart (file)、JSON {"url"}、または JSON {"base64","filename"} のいずれかで送ってください',
+  throw new FemtoError("bad_request", "No media was provided", {
+    hint: 'Send multipart (file), JSON {"url"}, or JSON {"base64","filename"}.',
   });
 });
 
@@ -147,11 +147,11 @@ api.put("/media/:id", async (c) => {
   const ctx = c.get("ctx");
   const id = c.req.param("id");
   if (!MEDIA_ID_RE.test(id)) {
-    throw new FemtoError("bad_request", `メディア id の形式が不正です: "${id}"`, { hint: "m_ + 英小文字と数字 12 文字 (例: m_0123456789ab)" });
+    throw new FemtoError("bad_request", `Invalid media id format: "${id}"`, { hint: "Use m_ followed by 12 lowercase letters or digits (example: m_0123456789ab)." });
   }
   const q = query(c);
   const filename = q.get("filename");
-  if (!filename) throw new FemtoError("bad_request", "filename クエリが必要です", { hint: "PUT /api/media/<id>?filename=photo.png" });
+  if (!filename) throw new FemtoError("bad_request", "filename query parameter is required", { hint: "Use PUT /api/media/<id>?filename=photo.png." });
   checkContentLength(c);
   const media = await uploadMedia(
     ctx,
@@ -200,7 +200,7 @@ api.post("/import", async (c) => {
   const body = await jsonObject(c);
   const mode = body.mode;
   if (mode !== "merge" && mode !== "replace") {
-    throw invalid([{ path: "mode", message: 'mode は "merge" か "replace" です', expected: "merge | replace", received: mode }]);
+    throw invalid([{ path: "mode", message: 'mode must be "merge" or "replace"', expected: "merge | replace", received: mode }]);
   }
   return c.json(await importData(c.get("ctx"), { data: body.data as ExportData, mode, confirm: optionalString(body, "confirm") }));
 });
@@ -311,7 +311,7 @@ api.post("/:c/:id/preview", async (c) => {
   const ttl = body.ttlSeconds;
   if (ttl !== undefined && !(Number.isInteger(ttl) && (ttl as number) >= 1 && (ttl as number) <= MAX_PREVIEW_TTL_SECONDS)) {
     throw invalid([{
-      path: "ttlSeconds", message: `ttlSeconds は 1〜${MAX_PREVIEW_TTL_SECONDS} の整数（秒）です`,
+      path: "ttlSeconds", message: `ttlSeconds must be an integer from 1 to ${MAX_PREVIEW_TTL_SECONDS} (seconds)`,
       expected: `integer 1..${MAX_PREVIEW_TTL_SECONDS}`, received: ttl,
     }]);
   }

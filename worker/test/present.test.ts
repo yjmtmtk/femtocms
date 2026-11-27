@@ -29,7 +29,7 @@ const insertMedia = (id: string, o: { filename?: string; deleted?: boolean } = {
   ).bind(id, o.filename ?? "a.png", o.deleted ? "now" : null).run();
 
 describe("renderMarkdown", () => {
-  it("生 HTML（ブロック・インライン）はエスケープされる", () => {
+  it("raw HTML (block and inline) is escaped", () => {
     const h = renderMarkdown("<script>x</script>\n\ntext <b onclick=1>b</b>");
     expect(h).not.toContain("<script>");
     expect(h).not.toContain("<b ");
@@ -40,17 +40,17 @@ describe("renderMarkdown", () => {
     "[x](javascript:alert(1))", "[x](JaVaScRiPt:alert(1))", "[x]( javascript:alert(1))", "[x](java\tscript:alert(1))",
     "[x](data:text/html,hi)", "[x](vbscript:x)", "![x](javascript:alert(1))",
     "[x][r]\n\n[r]: javascript:alert(1)",
-  ])("危険な URL はリンクにならない: %s", (md) => {
+  ])("a dangerous URL does not become a link: %s", (md) => {
     const h = renderMarkdown(md);
     expect(h).not.toMatch(/href\s*=/i);
     expect(h).not.toMatch(/src\s*=/i);
   });
-  it("javascript&colon; のような実体参照は & をエスケープして無効化する", () => {
+  it("an entity reference such as javascript&colon; is disabled by escaping &", () => {
     const h = renderMarkdown("[x](javascript&colon;alert(1))");
     expect(h).toContain("javascript&amp;colon;");
     expect(h).not.toMatch(/href="javascript:/i);
   });
-  it("安全な URL は残る", () => {
+  it("a safe URL is kept", () => {
     const h = renderMarkdown("[a](https://e.com/x) [b](/rel) [c](mailto:a@b.c) ![i](https://e.com/i.png)");
     expect(h).toContain('href="https://e.com/x"');
     expect(h).toContain('href="/rel"');
@@ -60,40 +60,40 @@ describe("renderMarkdown", () => {
 });
 
 describe("presentEntries", () => {
-  it("markdown は html に入り、生 HTML はエスケープされる", async () => {
+  it("markdown goes into html, and raw HTML is escaped", async () => {
     const [e] = await presentEntries(admin(), news, [rec({ title: "t", body: "# 見出し\n<script>x</script>" })], {});
     expect(e.data.body).toBe("# 見出し\n<script>x</script>");
     expect(e.html.body).toContain("<h1>見出し</h1>");
     expect(e.html.body).not.toContain("<script>");
   });
-  it("スキーマから消えたフィールドは出さない", async () => {
+  it("fields removed from the schema are not output", async () => {
     const [e] = await presentEntries(admin(), news, [rec({ title: "t", removed: 1 })], {});
     expect(e.data).not.toHaveProperty("removed");
   });
-  it("型が合わない古い値でも落ちない", async () => {
+  it("an old value of the wrong type does not break it", async () => {
     const [e] = await presentEntries(admin(), news, [rec({ title: "t", body: 123 })], {});
     expect(e.data.body).toBe(123);
     expect(e.html).not.toHaveProperty("body");
   });
-  it("fields 指定時はその data キーだけ出す", async () => {
+  it("with fields, only those data keys are output", async () => {
     const [e] = await presentEntries(admin(), news, [rec({ title: "t", body: "b" })], { fields: ["title"] });
     expect(Object.keys(e.data)).toEqual(["title"]);
     expect(e.html).toEqual({});
   });
-  it("メタ情報がそのまま出る", async () => {
+  it("metadata is output as is", async () => {
     const [e] = await presentEntries(admin(), news, [rec({}, { slug: "s" })], {});
     expect(e).toMatchObject({ id: "e_aaaaaaaaaaaa", slug: "s", status: "published", createdAt: "2026-01-01T00:00:00.000Z",
       updatedAt: "2026-01-02T00:00:00.000Z", publishedAt: "2026-01-01T00:00:00.000Z" });
     expect(e).not.toHaveProperty("collectionId");
   });
-  it("画像は URL 付きオブジェクトになり、日本語ファイル名はエンコードされる", async () => {
+  it("an image becomes an object with a URL, and a Japanese filename is encoded", async () => {
     await insertMedia("m_aaaaaaaaaaaa", { filename: "お知らせ 画像.png" });
     const [e] = await presentEntries(admin(), withCover, [rec({ title: "t", cover: "m_aaaaaaaaaaaa" })], {});
     expect(e.data.cover).toMatchObject({ id: "m_aaaaaaaaaaaa",
       url: "https://cms.test/media/m_aaaaaaaaaaaa/%E3%81%8A%E7%9F%A5%E3%82%89%E3%81%9B%20%E7%94%BB%E5%83%8F.png",
       width: 4, height: 3, alt: "代替", mimeType: "image/png" });
   });
-  it("ゴミ箱・不存在の画像は null、id でない古い値はそのまま", async () => {
+  it("a trashed or missing image gives null, and an old value that is not an id is kept as is", async () => {
     await insertMedia("m_bbbbbbbbbbbb", { deleted: true });
     const [a, b, c] = await presentEntries(admin(), withCover, [
       rec({ cover: "m_bbbbbbbbbbbb" }), rec({ cover: "m_cccccccccccc" }), rec({ cover: 5 }),
@@ -102,7 +102,7 @@ describe("presentEntries", () => {
     expect(b.data.cover).toBeNull();
     expect(c.data.cover).toBe(5);
   });
-  it("multiple の画像: ゴミ箱・不存在の要素は配列から除き、id でない古い値はそのまま", async () => {
+  it("image multiple: trashed or missing elements are dropped from the array, and old values that are not ids are kept as is", async () => {
     await insertMedia("m_aaaaaaaaaaaa");
     await insertMedia("m_bbbbbbbbbbbb", { deleted: true });
     const c: Collection = { ...news, fields: [{ name: "gallery", type: "image", multiple: true }] };
@@ -112,11 +112,11 @@ describe("presentEntries", () => {
     expect(a.data.gallery).toEqual([expect.objectContaining({ id: "m_aaaaaaaaaaaa" })]);
     expect(b.data.gallery).toEqual([expect.objectContaining({ id: "m_aaaaaaaaaaaa" }), "legacy"]);
   });
-  it("id の形でない古い画像値はそのまま返し、問い合わせない", async () => {
+  it("an old image value that does not look like an id is returned as is without querying", async () => {
     const [e] = await presentEntries(admin(), withCover, [rec({ cover: "legacy-string" })], {});
     expect(e.data.cover).toBe("legacy-string");
   });
-  it("保存されていない constructor / toString などのフィールドは出さない", async () => {
+  it("fields that are not stored, such as constructor / toString, are not output", async () => {
     const c: Collection = { ...news, fields: [
       { name: "constructor", type: "text" }, { name: "toString", type: "markdown" },
       { name: "valueOf", type: "image" }, { name: "hasOwnProperty", type: "reference", collection: "news" } ] };
@@ -126,7 +126,7 @@ describe("presentEntries", () => {
     const [s] = await presentEntries(admin(), c, [rec({ constructor: "stored" })], {});
     expect(s.data).toEqual({ constructor: "stored" });
   });
-  it("画像のクエリは複数レコードでも1回にまとまる", async () => {
+  it("image queries are batched into one even for multiple records", async () => {
     await insertMedia("m_aaaaaaaaaaaa");
     await insertMedia("m_bbbbbbbbbbbb");
     const ctx = admin();
@@ -145,7 +145,7 @@ describe("presentEntries", () => {
     await presentEntries(spy, news, [rec({ title: "x" })], {});
     expect(prepared).toHaveLength(0);
   });
-  it("list の中の画像も ApiMedia になり、参照は id のまま（参照先が無ければ null）", async () => {
+  it("images inside a list also become ApiMedia, and references stay ids (null if the target is missing)", async () => {
     await insertMedia("m_aaaaaaaaaaaa");
     await createCollection(admin(), { name: "news", fields: [{ name: "title", type: "text" }] });
     const target = await createEntry(admin(), "news", { data: { title: "t" } });
@@ -162,18 +162,18 @@ describe("presentEntries", () => {
     expect(missing.ref).toBeNull();
     expect(e.html).toEqual({});
   });
-  it("presentEntry は1件版", async () => {
+  it("presentEntry is the single-entry version", async () => {
     const e = await presentEntry(admin(), news, rec({ title: "t" }), {});
     expect(e.data).toEqual({ title: "t" });
   });
 });
 
 describe("presentMedia / mediaUrl", () => {
-  it("ペアになっていないサロゲートを含む名前でも throw せず、U+FFFD としてエンコードする", () => {
+  it("a name with an unpaired surrogate does not throw and is encoded as U+FFFD", () => {
     expect(mediaUrl("https://o", { id: "m_1", filename: "a\udc00b.png" })).toBe("https://o/media/m_1/a%EF%BF%BDb.png");
     expect(mediaUrl("https://o", { id: "m_1", filename: "\ud800" })).toBe("https://o/media/m_1/%EF%BF%BD");
   });
-  it("URL とフィールド", () => {
+  it("URL and fields", () => {
     expect(mediaUrl("https://o", { id: "m_1", filename: "a b.png" })).toBe("https://o/media/m_1/a%20b.png");
     expect(presentMedia(admin(), { id: "m_1", filename: "a.png", mimeType: "image/png", size: 1, width: null, height: null, alt: "", createdAt: "t" }))
       .toEqual({ id: "m_1", url: "https://cms.test/media/m_1/a.png", filename: "a.png", mimeType: "image/png", size: 1,
@@ -181,7 +181,7 @@ describe("presentMedia / mediaUrl", () => {
   });
 });
 
-describe("参照の展開", () => {
+describe("reference expansion", () => {
   let author: EntryRecord;
   let post: Collection;
   beforeEach(async () => {
@@ -195,14 +195,14 @@ describe("参照の展開", () => {
   });
   const postRec = (data: Record<string, unknown>): EntryRecord => rec(data, { collectionId: post.id });
 
-  it("既定は id 文字列、expand で ApiEntry（html 付き・さらには展開しない）", async () => {
+  it("by default an id string; with expand an ApiEntry (with html, not expanded further)", async () => {
     const [plain] = await presentEntries(pub(), post, [postRec({ author: author.id })], {});
     expect(plain.data.author).toBe(author.id);
     const [exp] = await presentEntries(pub(), post, [postRec({ author: author.id })], { expand: ["author"] });
     expect(exp.data.author).toMatchObject({ id: author.id, data: { name: "山田" } });
     expect((exp.data.author as { html: Record<string, string> }).html.bio).toContain("<h1>hi</h1>");
   });
-  it("expand で参照先に置き換えたフィールド名を expanded に並べる（置き換えがなければ expanded は付けない）", async () => {
+  it("expanded lists the names of fields replaced by their targets with expand (expanded is omitted when nothing is replaced)", async () => {
     const [plain] = await presentEntries(pub(), post, [postRec({ author: author.id })], {});
     expect(plain).not.toHaveProperty("expanded");
     const [exp] = await presentEntries(pub(), post, [postRec({ author: author.id })], { expand: ["author", "nope"] });
@@ -215,14 +215,14 @@ describe("参照の展開", () => {
     const [m] = await presentEntries(pub(), multi, [postRec({ authors: [author.id] })], { expand: ["authors"] });
     expect(m.expanded).toEqual(["authors"]);
   });
-  it("expand した参照先が下書きなら public には null、admin には出る", async () => {
+  it("if the expanded target is a draft, public gets null and admin sees it", async () => {
     const draft = await createEntry(admin(), "authors", { data: { name: "下書き" } });
     const r = postRec({ author: draft.id });
     expect((await presentEntries(pub(), post, [r], { expand: ["author"] }))[0].data.author).toBeNull();
     expect((await presentEntries(reader(), post, [r], { expand: ["author"] }))[0].data.author).toBeNull();
     expect((await presentEntries(admin(), post, [r], { expand: ["author"] }))[0].data.author).toMatchObject({ id: draft.id });
   });
-  it("multiple の参照: 既定は id の配列（存在しない要素は除く）、expand では読めない要素（下書きなど）も配列から除く", async () => {
+  it("reference multiple: by default an array of ids (missing elements are dropped); with expand, elements that cannot be read (such as drafts) are also dropped", async () => {
     const multi: Collection = { ...post, fields: [{ name: "authors", type: "reference", collection: "authors", multiple: true }] };
     const draft = await createEntry(admin(), "authors", { data: { name: "下書き" } });
     const r = postRec({ authors: [draft.id, author.id, "e_nonexistent0"] });
@@ -232,22 +232,22 @@ describe("参照の展開", () => {
     expect((await presentEntries(admin(), multi, [r], { expand: ["authors"] }))[0].data.authors)
       .toEqual([expect.objectContaining({ id: draft.id }), expect.objectContaining({ id: author.id })]);
   });
-  it("ゴミ箱・不存在の参照先は null", async () => {
+  it("a trashed or missing target gives null", async () => {
     await env.DB.prepare("UPDATE entries SET deleted_at = 'now' WHERE id = ?").bind(author.id).run();
     expect((await presentEntries(admin(), post, [postRec({ author: author.id })], { expand: ["author"] }))[0].data.author).toBeNull();
     expect((await presentEntries(admin(), post, [postRec({ author: "e_nonexistent0" })], { expand: ["author"] }))[0].data.author).toBeNull();
   });
-  it("非公開コレクションの参照先は public には null、read には出る", async () => {
+  it("a target in a private collection gives null for public and is visible to read", async () => {
     const s = await createEntry(admin(), "secret", { data: { name: "x" }, status: "published" });
     const r = postRec({ hidden: s.id });
     expect((await presentEntries(pub(), post, [r], { expand: ["hidden"] }))[0].data.hidden).toBeNull();
     expect((await presentEntries(reader(), post, [r], { expand: ["hidden"] }))[0].data.hidden).toMatchObject({ id: s.id });
   });
-  it("参照先が別コレクションのエントリなら null", async () => {
+  it("a target that is an entry of another collection gives null", async () => {
     const s = await createEntry(admin(), "secret", { data: { name: "x" }, status: "published" });
     expect((await presentEntries(admin(), post, [postRec({ author: s.id })], { expand: ["author"] }))[0].data.author).toBeNull();
   });
-  describe("expand なしでも、参照先が無い・ゴミ箱・ゴミ箱のコレクション・別コレクションなら null（multiple は除く）", () => {
+  describe("even without expand, a missing target, a trashed target, a target in a trashed collection or in another collection gives null (dropped for multiple)", () => {
     let gone: { trashed: string; inTrashedCollection: string; other: string };
     beforeEach(async () => {
       const t = await createEntry(admin(), "authors", { data: { name: "捨てた" }, status: "published" });
@@ -259,7 +259,7 @@ describe("参照の展開", () => {
       gone = { trashed: t.id, inTrashedCollection: o.id, other: s.id };
     });
 
-    it("単一の参照（トップレベル）", async () => {
+    it("a single reference (top level)", async () => {
       const out = await presentEntries(pub(), post, [
         postRec({ author: author.id }), postRec({ author: gone.trashed }), postRec({ author: gone.other }),
         postRec({ author: "e_nonexistent0" }), postRec({ author: "legacy" }),
@@ -270,7 +270,7 @@ describe("参照の展開", () => {
       expect((await presentEntries(admin(), oldRef, [postRec({ o: gone.inTrashedCollection })], {}))[0].data.o).toBeNull();
     });
 
-    it("multiple と list の中", async () => {
+    it("multiple and inside a list", async () => {
       const c: Collection = { ...post, fields: [
         { name: "many", type: "reference", collection: "authors", multiple: true },
         { name: "rows", type: "list", fields: [{ name: "who", type: "reference", collection: "authors" }, { name: "all", type: "reference", collection: "authors", multiple: true }] },
@@ -283,7 +283,7 @@ describe("参照の展開", () => {
       expect(e.data.rows).toEqual([{ who: null, all: [author.id] }, { who: author.id }]);
     });
 
-    it("展開したエントリの中の参照も同じ扱い", async () => {
+    it("references inside an expanded entry are handled the same way", async () => {
       await createCollection(admin(), { name: "people", fields: [
         { name: "name", type: "text" }, { name: "friend", type: "reference", collection: "authors" },
       ] });
@@ -294,7 +294,7 @@ describe("参照の展開", () => {
       expect((e.data.by as { data: Record<string, unknown> }).data.friend).toBeNull();
     });
 
-    it("参照の存在確認は何件あっても entries へのクエリ 1 回", async () => {
+    it("the existence check of references needs one query to entries, however many there are", async () => {
       const ctx = admin();
       const prepared: string[] = [];
       const spy = { ...ctx, db: new Proxy(ctx.db, { get(t, p) {
@@ -310,7 +310,7 @@ describe("参照の展開", () => {
     });
   });
 
-  it("展開した参照先の画像も解決され、クエリは media 1回・entries 1回", async () => {
+  it("images of expanded targets are also resolved, with 1 media query and 1 entries query", async () => {
     await insertMedia("m_aaaaaaaaaaaa");
     const a2 = await createEntry(admin(), "authors", { data: { name: "b", avatar: "m_aaaaaaaaaaaa" }, status: "published" });
     await publishEntry(admin(), "authors", a2.id);

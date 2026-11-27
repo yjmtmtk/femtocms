@@ -33,8 +33,8 @@ beforeEach(async () => {
 });
 afterEach(() => vi.restoreAllMocks());
 
-describe("コレクション・エントリの流れ", () => {
-  it("一連の流れ: コレクション作成 → 記事作成 → 公開 → キー無しで読める", async () => {
+describe("collection and entry flow", () => {
+  it("full flow: create collection → create entry → publish → readable without a key", async () => {
     expect((await api("POST", "/api/collections", { key: K, body: news })).status).toBe(201);
     const created = await api("POST", "/api/news", { key: K, body: { data: { title: "冬" }, slug: "winter" } });
     expect(created.status).toBe(201);
@@ -46,7 +46,7 @@ describe("コレクション・エントリの流れ", () => {
     expect(await json(await api("GET", "/api/news/winter"))).toMatchObject({ id: e.id, status: "published" });
   });
 
-  it("コレクションの取得・更新・削除（204 で本文なし）と一覧", async () => {
+  it("get, update and delete of a collection (204 with no body) and the list", async () => {
     await api("POST", "/api/collections", { key: K, body: news });
     expect(await json(await api("GET", "/api/collections"))).toMatchObject({ items: [{ name: "news" }] });
     expect(await json(await api("GET", "/api/collections/news"))).toMatchObject({ name: "news", kind: "list" });
@@ -58,7 +58,7 @@ describe("コレクション・エントリの流れ", () => {
     expect((await api("GET", "/api/collections/news")).status).toBe(404);
   });
 
-  it("PATCH / unpublish / DELETE（ゴミ箱へ）/ fields と expand の受け渡し", async () => {
+  it("PATCH / unpublish / DELETE (to the trash) / passing fields and expand", async () => {
     await api("POST", "/api/collections", { key: K, body: news });
     const e = await json(await api("POST", "/api/news", { key: K, body: { data: { title: "a", body: "**b**" }, status: "published" } }));
     expect(e).toMatchObject({ status: "published", html: { body: expect.stringContaining("<strong>b</strong>") } });
@@ -72,7 +72,7 @@ describe("コレクション・エントリの流れ", () => {
     expect((await json(await api("GET", "/api/trash", { key: K }))).items).toMatchObject([{ type: "entry", id: e.id }]);
   });
 
-  it("single: GET は単一エントリ（無ければ 404）、PUT で作成・更新、list への PUT は 400", async () => {
+  it("single: GET returns the one entry (404 if none), PUT creates or updates it, PUT to a list collection gives 400", async () => {
     await api("POST", "/api/collections", { key: K, body: site });
     await api("POST", "/api/collections", { key: K, body: news });
     expect((await api("GET", "/api/site", { key: K })).status).toBe(404);
@@ -83,14 +83,14 @@ describe("コレクション・エントリの流れ", () => {
     expect((await json(await api("PUT", "/api/news", { key: K, body: { data: {} } }))).error.code).toBe("bad_request");
   });
 
-  it("検証エラーは 422 で issues を含む", async () => {
+  it("a validation error gives 422 and includes issues", async () => {
     await api("POST", "/api/collections", { key: K, body: news });
     const res = await api("POST", "/api/news", { key: K, body: { data: { title: 1 } } });
     expect(res.status).toBe(422);
     expect((await json(res)).error).toMatchObject({ code: "validation_failed", issues: [{ path: "data.title" }] });
   });
 
-  it("body の status が draft/published 以外なら 422（POST・PUT とも）", async () => {
+  it("a body status other than draft/published gives 422 (for both POST and PUT)", async () => {
     await api("POST", "/api/collections", { key: K, body: news });
     await api("POST", "/api/collections", { key: K, body: site });
     for (const [method, path] of [["POST", "/api/news"], ["PUT", "/api/site"]] as const) {
@@ -100,7 +100,7 @@ describe("コレクション・エントリの流れ", () => {
     }
   });
 
-  it("不正な JSON・オブジェクトでない本文は 400 で hint が付く", async () => {
+  it("invalid JSON or a body that is not an object gives 400 with a hint", async () => {
     await api("POST", "/api/collections", { key: K, body: news });
     for (const body of ["{oops", "[1]", "null", ""]) {
       const res = await api("POST", "/api/news", { key: K, body });
@@ -109,14 +109,14 @@ describe("コレクション・エントリの流れ", () => {
     }
   });
 
-  it("コレクション POST: 重複は 409", async () => {
+  it("collection POST: a duplicate gives 409", async () => {
     await api("POST", "/api/collections", { key: K, body: news });
     expect((await api("POST", "/api/collections", { key: K, body: news })).status).toBe(409);
   });
 });
 
-describe("認可", () => {
-  it("キー無しの書き込みは 401、読み取りキーでの書き込みは 403", async () => {
+describe("authorization", () => {
+  it("a write without a key gives 401, and a write with a read key gives 403", async () => {
     await api("POST", "/api/collections", { key: K, body: news });
     const created = await json(await api("POST", "/api/keys", { key: K, body: { name: "r", role: "read" } }));
     const res401 = await api("POST", "/api/news", { body: { data: { title: "x" } } });
@@ -127,12 +127,12 @@ describe("認可", () => {
     expect((await json(res403)).error.code).toBe("forbidden");
   });
 
-  it("不正・失効したキーは 401", async () => {
+  it("an invalid or revoked key gives 401", async () => {
     expect((await api("GET", "/api/collections", { key: generateKey("admin") })).status).toBe(401);
     expect((await api("GET", "/api/collections", { headers: { Authorization: "Bearer nope" } })).status).toBe(401);
   });
 
-  it("public:false のコレクションは読み取りキーが要る", async () => {
+  it("a collection with public:false needs a read key", async () => {
     await api("POST", "/api/collections", { key: K, body: { ...news, public: false } });
     await api("POST", "/api/news", { key: K, body: { data: { title: "x" }, slug: "x", status: "published" } });
     const { key } = await json(await api("POST", "/api/keys", { key: K, body: { name: "r", role: "read" } }));
@@ -144,8 +144,8 @@ describe("認可", () => {
   });
 });
 
-describe("メディア", () => {
-  it("multipart で画像を上げられる", async () => {
+describe("media", () => {
+  it("an image can be uploaded with multipart", async () => {
     const form = new FormData();
     form.set("file", new File([fixtures.png], "dot.png", { type: "image/png" }));
     form.set("alt", "点");
@@ -158,14 +158,14 @@ describe("メディア", () => {
     expect(new Uint8Array(await served.arrayBuffer())).toEqual(fixtures.png);
   });
 
-  it("multipart に file が無ければ 400", async () => {
+  it("multipart without a file gives 400", async () => {
     const form = new FormData();
     form.set("alt", "x");
     const res = await SELF.fetch("https://cms.test/api/media", { method: "POST", headers: { Authorization: `Bearer ${K}` }, body: form });
     expect(res.status).toBe(400);
   });
 
-  it("JSON の base64 で上げられる。url / base64 どちらも無ければ 400", async () => {
+  it("can be uploaded as JSON base64; neither url nor base64 gives 400", async () => {
     const b64 = btoa(String.fromCharCode(...fixtures.png));
     const res = await api("POST", "/api/media", { key: K, body: { base64: b64, filename: "p.png", alt: "x" } });
     expect(res.status).toBe(201);
@@ -174,7 +174,7 @@ describe("メディア", () => {
     expect((await api("POST", "/api/media", { key: K, body: { base64: b64 } })).status).toBe(422);
   });
 
-  it("JSON の url で取り込める（外部 fetch はモック）", async () => {
+  it("can be imported from a JSON url (the external fetch is mocked)", async () => {
     const real = globalThis.fetch;
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) =>
       String(input).startsWith("https://img.test/")
@@ -185,7 +185,7 @@ describe("メディア", () => {
     expect(await json(res)).toMatchObject({ filename: "pic.png", mimeType: "image/png" });
   });
 
-  it("PUT /api/media/:id は id を保って上書きでき、id の形式を検証する", async () => {
+  it("PUT /api/media/:id overwrites while keeping the id, and validates the id format", async () => {
     const id = "m_0123456789ab";
     const res = await SELF.fetch(`https://cms.test/api/media/${id}?filename=a.png&alt=hi`, {
       method: "PUT", headers: { Authorization: `Bearer ${K}`, "Content-Type": "image/png" }, body: fixtures.png,
@@ -202,7 +202,7 @@ describe("メディア", () => {
     expect(noName.status).toBe(400);
   });
 
-  it("一覧・PATCH(alt)・DELETE、書き込みは管理キー必須", async () => {
+  it("list, PATCH(alt) and DELETE; writes need an admin key", async () => {
     const id = "m_aaaaaaaaaaaa";
     await SELF.fetch(`https://cms.test/api/media/${id}?filename=a.png`, {
       method: "PUT", headers: { Authorization: `Bearer ${K}` }, body: fixtures.png,
@@ -216,8 +216,8 @@ describe("メディア", () => {
   });
 });
 
-describe("ゴミ箱とキー", () => {
-  it("restore / 完全削除（confirm はクエリ）/ 空にする", async () => {
+describe("trash and keys", () => {
+  it("restore / permanent delete (confirm is a query parameter) / empty the trash", async () => {
     await api("POST", "/api/collections", { key: K, body: news });
     const a = await json(await api("POST", "/api/news", { key: K, body: { data: { title: "a" } } }));
     const b = await json(await api("POST", "/api/news", { key: K, body: { data: { title: "b" } } }));
@@ -237,7 +237,7 @@ describe("ゴミ箱とキー", () => {
     expect(await json(await api("DELETE", "/api/trash?confirm=dev-site", { key: K }))).toEqual({ deleted: 1 });
   });
 
-  it("キーの作成（201 で平文を返す）・一覧・失効", async () => {
+  it("key creation (201 returns the plain key), list and revoke", async () => {
     const created = await api("POST", "/api/keys", { key: K, body: { name: "lp", role: "read" } });
     expect(created.status).toBe(201);
     const { key, info } = await json(created);
@@ -257,13 +257,13 @@ describe("CORS", () => {
       method: "OPTIONS", headers: { Origin: origin, "Access-Control-Request-Method": "GET" },
     });
 
-  it("OPTIONS に CORS ヘッダが付く", async () => {
+  it("OPTIONS gets CORS headers", async () => {
     const res = await preflight("/api/news");
     expect(res.headers.get("access-control-allow-origin")).toBe("*");
     expect(res.headers.get("access-control-allow-methods")).toBe("GET,POST,PUT,PATCH,DELETE,OPTIONS");
     expect(res.headers.get("access-control-allow-headers")).toBe("Authorization,Content-Type");
   });
-  it("通常応答・エラー応答・/media にも付く", async () => {
+  it("also set on normal responses, error responses and /media", async () => {
     expect((await api("GET", "/api/collections", { headers: { Origin: "https://lp.test" } })).headers.get("access-control-allow-origin")).toBe("*");
     const err = await api("GET", "/api/nothing/here/at/all", { headers: { Origin: "https://lp.test" } });
     expect(err.status).toBe(404);
@@ -273,7 +273,7 @@ describe("CORS", () => {
     expect(media.headers.get("access-control-allow-origin")).toBe("*");
     expect((await preflight("/media/m_000000000000")).headers.get("access-control-allow-origin")).toBe("*");
   });
-  it("CORS_ORIGINS を指定すると一致するオリジンだけ許可される", async () => {
+  it("with CORS_ORIGINS set, only matching origins are allowed", async () => {
     const { app } = await import("../src/index");
     const e = { ...env, CORS_ORIGINS: "https://a.test, https://b.test" };
     const req = (origin: string) =>
@@ -283,8 +283,8 @@ describe("CORS", () => {
   });
 });
 
-describe("エラー応答", () => {
-  it("未知のルートは not_found の JSON", async () => {
+describe("error responses", () => {
+  it("an unknown route gives a not_found JSON", async () => {
     const res = await api("GET", "/api/a/b/c/d", { key: K });
     expect(res.status).toBe(404);
     expect((await json(res)).error.code).toBe("not_found");
@@ -293,7 +293,7 @@ describe("エラー応答", () => {
     expect((await json(other)).error.code).toBe("not_found");
   });
 
-  it("errorResponse: FemtoError は形を保ち、それ以外は 500 で中身を漏らさない", async () => {
+  it("errorResponse: a FemtoError keeps its shape, anything else gives 500 without leaking details", async () => {
     const spy = vi.spyOn(console, "error").mockImplementation(() => {});
     const res = errorResponse(new Error("secret db password"));
     expect(res.status).toBe(500);
@@ -301,7 +301,7 @@ describe("エラー応答", () => {
     expect(spy).toHaveBeenCalledOnce();
   });
 
-  it("想定外の例外は 500 で中身を漏らさない", async () => {
+  it("an unexpected exception gives 500 without leaking details", async () => {
     const spy = vi.spyOn(console, "error").mockImplementation(() => {});
     vi.spyOn(collectionsModule, "listCollections").mockRejectedValue(new Error("secret db password"));
     const res = await api("GET", "/api/collections", { key: K });
@@ -314,7 +314,7 @@ describe("エラー応答", () => {
 });
 
 describe("export / import / reset", () => {
-  it("export は admin のみ。取り込みで空のサイトに復元でき、reset は confirm 必須", async () => {
+  it("export is admin only; an import can restore an empty site, and reset needs confirm", async () => {
     await api("POST", "/api/collections", { key: K, body: news });
     await api("POST", "/api/news", { key: K, body: { data: { title: "冬" }, slug: "winter", status: "published" } });
     expect((await api("GET", "/api/export")).status).toBe(401);
@@ -334,15 +334,15 @@ describe("export / import / reset", () => {
       .toEqual({ collections: 1, entries: 1, media: 0 });
     expect(await json(await api("GET", "/api/news/winter"))).toMatchObject({ status: "published", data: { title: "冬" } });
   });
-  it("import の検証エラーは 422 で issues に path が入る", async () => {
+  it("an import validation error gives 422 with a path in issues", async () => {
     const res = await api("POST", "/api/import", { key: K, body: { mode: "merge", data: { format: "femtocms-export", version: 1, collections: [], entries: [{ id: "x" }], media: [] } } });
     expect(res.status).toBe(422);
     expect((await json(res)).error.issues.map((i: { path: string }) => i.path)).toContain("entries[0].id");
   });
 });
 
-describe("ペアになっていないサロゲートを含むファイル名", () => {
-  it("base64 のアップロードは 201、一覧も配信も 500 にならず、URL は正しくエンコードされる", async () => {
+describe("filenames containing unpaired surrogates", () => {
+  it("a base64 upload gives 201, listing and serving do not give 500, and the URL is encoded correctly", async () => {
     const png = btoa(String.fromCharCode(...fixtures.png));
     const res = await api("POST", "/api/media", { key: K, body: { base64: png, filename: "\ud800.png" } });
     expect(res.status).toBe(201);
@@ -357,7 +357,7 @@ describe("ペアになっていないサロゲートを含むファイル名", (
     expect(file.headers.get("content-disposition")).toBe("inline; filename*=UTF-8''%EF%BF%BD.png");
   });
 
-  it("既に保存されている行（D1 が置き換えた文字を含む）も、一覧・配信・エントリの画像で 500 にならない", async () => {
+  it("rows that are already stored (including characters replaced by D1) also do not give 500 in the list, serving and entry images", async () => {
     await env.DB.prepare(
       "INSERT INTO media (id, filename, mime_type, size, created_at) VALUES ('m_000000000bad', ?, 'image/png', 1, 'now')",
     ).bind("a\udc00b.png").run();

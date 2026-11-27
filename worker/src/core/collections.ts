@@ -19,7 +19,7 @@ function toCollection(r: CollectionRow): Collection {
 }
 
 const notFound = (name: string) =>
-  new FemtoError("not_found", `コレクション "${name}" が見つかりません`, { hint: "list_collections で一覧を確認してください" });
+  new FemtoError("not_found", `Collection "${name}" not found`, { hint: "Call list_collections to see the existing collections." });
 
 /** Internal: no role check (callers do their own). Trashed collections are hidden unless includeTrashed. */
 export async function getCollectionRow(
@@ -50,10 +50,10 @@ export async function createCollection(ctx: Ctx, input: unknown): Promise<Collec
   const existing = await ctx.db
     .prepare("SELECT deleted_at FROM collections WHERE name = ?").bind(def.name).first<{ deleted_at: string | null }>();
   if (existing) {
-    throw new FemtoError("conflict", `コレクション "${def.name}" は既に存在します`, {
+    throw new FemtoError("conflict", `Collection "${def.name}" already exists`, {
       hint: existing.deleted_at
-        ? "ゴミ箱にあります。restore_from_trash で戻すか、ゴミ箱を空にしてから作成してください"
-        : "別の名前を使うか、update_collection で変更してください",
+        ? "It is in the trash. Call restore_from_trash to bring it back, or empty the trash and then create it."
+        : "Use a different name, or change the existing collection with update_collection.",
     });
   }
   const now = ctx.now().toISOString();
@@ -85,8 +85,8 @@ export async function updateCollection(ctx: Ctx, name: string, patch: unknown): 
   const current = await getCollectionRow(ctx, name);
   const def = parseCollectionInput(patch, "update");
   if (def.name !== undefined && def.name !== current.name) {
-    throw new FemtoError("validation_failed", "コレクション名は変更できません", {
-      issues: [{ path: "name", message: "作成後に name は変更できません", expected: current.name, received: def.name }],
+    throw new FemtoError("validation_failed", "Collection name cannot be changed", {
+      issues: [{ path: "name", message: "name cannot be changed after creation", expected: current.name, received: def.name }],
     });
   }
   if (def.kind === "single" && current.kind !== "single") {
@@ -94,8 +94,8 @@ export async function updateCollection(ctx: Ctx, name: string, patch: unknown): 
       .prepare("SELECT COUNT(*) AS n FROM entries WHERE collection_id = ? AND deleted_at IS NULL")
       .bind(current.id).first<{ n: number }>())!;
     if (n >= 2) {
-      throw new FemtoError("conflict", `有効なエントリが ${n} 件あるため single にできません`, {
-        hint: "エントリを1件になるまでゴミ箱へ移してから変更してください",
+      throw new FemtoError("conflict", `Cannot change to single because the collection has ${n} active entries`, {
+        hint: "Move entries to the trash until only one is left, then change the kind.",
       });
     }
   }
@@ -105,9 +105,9 @@ export async function updateCollection(ctx: Ctx, name: string, patch: unknown): 
       if (ref.collection === current.name) continue;
       const found = await ctx.db
         .prepare("SELECT 1 AS x FROM collections WHERE name = ? AND deleted_at IS NULL").bind(ref.collection).first();
-      if (!found) issues.push({ path: ref.path, message: `参照先コレクション "${ref.collection}" が存在しません` });
+      if (!found) issues.push({ path: ref.path, message: `Referenced collection "${ref.collection}" does not exist` });
     }
-    if (issues.length) throw new FemtoError("validation_failed", "コレクション定義が不正です", { issues });
+    if (issues.length) throw new FemtoError("validation_failed", "Invalid collection definition", { issues });
   }
   await ctx.db
     .prepare("UPDATE collections SET label = ?, description = ?, kind = ?, public = ?, fields = ?, updated_at = ? WHERE id = ?")

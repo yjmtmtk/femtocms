@@ -22,10 +22,10 @@ export type Prompter = {
   waitEnter(msg: string): Promise<void>;
 };
 
-const CANCELLED = "キャンセルしました";
+const CANCELLED = "Cancelled";
 
 async function clack() {
-  if (!process.stdin.isTTY) throw new Error("この操作は対話端末（ターミナル）で実行してください");
+  if (!process.stdin.isTTY) throw new Error("This operation needs an interactive terminal. Run it in a terminal");
   return import("@clack/prompts");
 }
 
@@ -57,7 +57,7 @@ export const clackPrompter: Prompter = {
 
 // --- helpers -----------------------------------------------------------------------------------
 
-const failure = (what: string, r: RunResult) => new Error(`${what}に失敗しました（wrangler の終了コード ${r.code}）\n${outputTail(r)}`);
+const failure = (what: string, r: RunResult) => new Error(`Failed to ${what} (wrangler exit code ${r.code})\n${outputTail(r)}`);
 
 /**
  * Every account-touching call is pinned to the chosen account three ways: the account in the environment, our generated
@@ -75,13 +75,13 @@ function bindSite(runner: WranglerRunner, accountId: string, configPath: string)
 
 function checkName(name: string): void {
   if (!PROFILE_NAME_RE.test(name)) {
-    throw new Error(`名前 "${name}" は使えません（小文字英数字とハイフン、先頭は英数字、64 文字まで）`);
+    throw new Error(`The name "${name}" is not allowed. Use lowercase letters, digits and hyphens, starting with a letter or digit, up to 64 characters`);
   }
 }
 
 function checkDomain(domain: string): void {
   if (!/^(?=.{1,253}$)[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/i.test(domain)) {
-    throw new Error(`--domain にはホスト名だけを指定してください（例: cms.example.com）。受け取った値: "${domain}"`);
+    throw new Error(`--domain takes a host name only, for example cms.example.com. Got: "${domain}"`);
   }
 }
 
@@ -98,7 +98,7 @@ export function normalizeCorsOrigins(raw: string): string {
       url = undefined;
     }
     if (!url || (url.protocol !== "https:" && url.protocol !== "http:") || url.pathname !== "/" || url.search || url.hash || o.includes("*") || url.username) {
-      throw new Error(`--cors-origins の "${o}" はオリジンとして読めません（例: https://www.example.com。パスやワイルドカードは使えません）`);
+      throw new Error(`--cors-origins: "${o}" is not a valid origin. Use a form like https://www.example.com (no path, no wildcard)`);
     }
     return url.origin;
   }).join(",");
@@ -117,28 +117,28 @@ interface Account { id: string; name?: string }
 async function pickAccount(runner: WranglerRunner, prompt: Prompter, log: (s: string) => void, wanted?: string): Promise<string> {
   let who = await runner(["whoami", "--json"]);
   if (who.code !== 0) {
-    log("Cloudflare にログインします。ブラウザが開くので、許可してください。");
+    log("Logging in to Cloudflare. A browser window will open: approve the login there.");
     const login = await runner(["login"], { interactive: true });
-    if (login.code !== 0) throw new Error("Cloudflare へのログインに失敗しました");
+    if (login.code !== 0) throw new Error("Cloudflare login failed");
     who = await runner(["whoami", "--json"]);
-    if (who.code !== 0) throw failure("ログイン状態の確認", who);
+    if (who.code !== 0) throw failure("check the Cloudflare login", who);
   }
   const accounts = ((extractJson(who.stdout) as { accounts?: Account[] } | undefined)?.accounts ?? []).filter((a) => a?.id);
-  if (accounts.length === 0) throw new Error("この Cloudflare ログインに使えるアカウントがありません");
+  if (accounts.length === 0) throw new Error("This Cloudflare login has no usable account");
   if (wanted) {
     if (accounts.some((a) => a.id === wanted)) return wanted;
     throw new Error(
-      `アカウント "${wanted}" はこの Cloudflare ログインでは使えません。使えるアカウント:\n` +
+      `The account "${wanted}" is not available to this Cloudflare login. Available accounts:\n` +
       accounts.map((a) => `  ${a.id}${a.name ? `  ${a.name}` : ""}`).join("\n"),
     );
   }
   if (accounts.length === 1) return accounts[0]!.id;
-  return prompt.select("使う Cloudflare アカウントを選んでください", accounts.map((a) => ({ value: a.id, label: a.name ? `${a.name} (${a.id})` : a.id })));
+  return prompt.select("Choose the Cloudflare account to use", accounts.map((a) => ({ value: a.id, label: a.name ? `${a.name} (${a.id})` : a.id })));
 }
 
 async function listDatabases(run: WranglerRunner): Promise<{ uuid: string; name: string }[]> {
   const r = await run(["d1", "list", "--json"]);
-  if (r.code !== 0) throw failure("D1 一覧の取得", r);
+  if (r.code !== 0) throw failure("list D1 databases", r);
   const parsed = extractJson(r.stdout);
   return Array.isArray(parsed) ? (parsed as { uuid: string; name: string }[]) : [];
 }
@@ -146,15 +146,15 @@ async function listDatabases(run: WranglerRunner): Promise<{ uuid: string; name:
 async function ensureDatabase(run: WranglerRunner, d1Name: string, log: (s: string) => void): Promise<string> {
   const existing = (await listDatabases(run)).find((d) => d.name === d1Name);
   if (existing) {
-    log(`D1 データベース ${d1Name} は作成済みです。再利用します`);
+    log(`D1 database ${d1Name} already exists. Reusing it`);
     return existing.uuid;
   }
-  log(`D1 データベース ${d1Name} を作成します`);
+  log(`Creating D1 database ${d1Name}`);
   const created = await run(["d1", "create", d1Name]);
-  if (created.code !== 0) throw failure("D1 の作成", created);
+  if (created.code !== 0) throw failure("create the D1 database", created);
   // The snippet wrangler prints varies by version and config format: fall back to asking for the list.
   const id = parseDatabaseId(`${created.stdout}\n${created.stderr}`) ?? (await listDatabases(run)).find((d) => d.name === d1Name)?.uuid;
-  if (!id) throw new Error(`D1 ${d1Name} の ID を取得できませんでした。wrangler d1 list で確認してください\n${outputTail(created)}`);
+  if (!id) throw new Error(`Could not get the ID of D1 database ${d1Name}. Check with wrangler d1 list\n${outputTail(created)}`);
   return id;
 }
 
@@ -165,24 +165,24 @@ async function ensureBucket(run: WranglerRunner, bucket: string, accountId: stri
     let step = await run(["r2", "bucket", "list"]);
     if (step.code === 0) {
       if (parseBucketNames(step.stdout).includes(bucket)) {
-        log(`R2 バケット ${bucket} は作成済みです。再利用します`);
+        log(`R2 bucket ${bucket} already exists. Reusing it`);
         return;
       }
-      log(`R2 バケット ${bucket} を作成します`);
+      log(`Creating R2 bucket ${bucket}`);
       step = await run(["r2", "bucket", "create", bucket]);
       if (step.code === 0) return;
       // The list is not paginated, so a bucket beyond its first page shows up here instead.
       if (BUCKET_EXISTS.test(`${step.stdout}\n${step.stderr}`)) {
-        log(`R2 バケット ${bucket} は作成済みです。再利用します`);
+        log(`R2 bucket ${bucket} already exists. Reusing it`);
         return;
       }
     }
-    if (!isR2NotEnabled(step)) throw failure("R2 の確認・作成", step);
+    if (!isR2NotEnabled(step)) throw failure("check or create the R2 bucket", step);
     log(
-      "R2 がまだ有効になっていません。次の URL を開いて R2 を有効にしてください（無料枠の範囲で使えます。支払い方法の登録を求められることがあります）:\n" +
+      "R2 is not enabled on this account yet. Open the URL below to enable it (it works within the free tier, but Cloudflare may ask you to add a payment method):\n" +
         `  https://dash.cloudflare.com/${accountId}/r2/overview`,
     );
-    await prompt.waitEnter("有効にしたら Enter を押してください（やめるときは Ctrl-C）");
+    await prompt.waitEnter("Press Enter once R2 is enabled (Ctrl-C to quit)");
   }
 }
 
@@ -194,19 +194,19 @@ async function deploy(run: WranglerRunner, site: Site, log: (s: string) => void)
   const args = ["deploy"];
   let r = await run(args);
   if (r.code !== 0 && /workers\.dev subdomain/i.test(`${r.stdout}\n${r.stderr}`)) {
-    log("このアカウントにはまだ workers.dev のサブドメインがありません。画面の案内に従って登録してください。");
+    log("This account has no workers.dev subdomain yet. Follow the prompts to register one.");
     const registered = await run(args, { interactive: true });
-    if (registered.code !== 0) throw new Error("workers.dev のサブドメイン登録とデプロイに失敗しました");
+    if (registered.code !== 0) throw new Error("Registering the workers.dev subdomain and deploying failed");
     r = await run(args);
   }
-  if (r.code !== 0) throw failure("デプロイ", r);
+  if (r.code !== 0) throw failure("deploy", r);
   const url = site.domain ? `https://${site.domain}` : findWorkersDevUrl(`${r.stdout}\n${r.stderr}`, site.workerName);
   return { url, tail: outputTail(r) };
 }
 
 async function migrate(run: WranglerRunner, d1Name: string): Promise<void> {
   const r = await run(["d1", "migrations", "apply", d1Name, "--remote"]);
-  if (r.code !== 0) throw failure("マイグレーションの適用", r);
+  if (r.code !== 0) throw failure("apply migrations", r);
 }
 
 /** True only when the saved key still works as an admin key on the deployed site. */
@@ -217,27 +217,27 @@ async function savedKeyWorks(profile: Profile | undefined, url: string, fetchImp
     return true;
   } catch (e) {
     if (e instanceof ApiError && (e.status === 401 || e.status === 403)) return false;
-    throw new Error(`保存済みのキーを ${url} で確認できませんでした（${(e as Error).message}）。少し待ってからもう一度 femtocms init を実行してください`);
+    throw new Error(`Could not verify the saved key at ${url} (${(e as Error).message}). Wait a moment, then run femtocms init again`);
   }
 }
 
 export function summaryLines(out: { url: string; key: string; mcpUrl: string }, keyIsNew: boolean, siteName: string): string[] {
   return [
     "",
-    "femtocms の準備ができました。",
+    "femtocms is ready.",
     "",
-    `サイト名（trash empty・reset・import --replace の --confirm に使います）: ${siteName}`,
-    `API の URL: ${out.url}`,
-    `管理キー:   ${out.key}`,
+    `Site name (used for --confirm in trash empty, reset and import --replace): ${siteName}`,
+    `API URL:   ${out.url}`,
+    `Admin key: ${out.key}`,
     keyIsNew
-      ? "  このキーが表示されるのはこの1回だけです。パスワード管理ツールなど安全な場所に保存してください（サーバにはハッシュだけが保存されます）。"
-      : "  保存済みのキーが使えたので、そのまま再利用しました。",
-    `MCP の URL: ${out.mcpUrl}`,
+      ? "  This key is shown only this once. Save it somewhere safe, such as a password manager (the server stores only a hash)."
+      : "  The saved key still works, so it was reused.",
+    `MCP URL:   ${out.mcpUrl}`,
     "",
-    "Claude Code に MCP サーバを追加するには:",
+    "To add the MCP server to Claude Code:",
     `  claude mcp add --transport http femtocms ${out.mcpUrl} --header "Authorization: Bearer ${out.key}"`,
     "",
-    "LP に埋め込むコード:",
+    "Code to embed in your landing page:",
     '  <div data-femtocms="news" data-limit="5"></div>',
     `  <script src="${out.url}/embed.js" defer></script>`,
     "",
@@ -287,11 +287,11 @@ export async function runInit(opts: InitOpts): Promise<{ url: string; key: strin
 
   const site: Site = { ...draft, d1Id };
   writeSiteConfig(site);
-  log("Worker をデプロイします（少し時間がかかります）");
+  log("Deploying the Worker (this takes a moment)");
   const deployed = await deploy(run, site, log);
-  if (!deployed.url) throw new Error(`デプロイの出力から URL を取得できませんでした。出力の末尾:\n${deployed.tail}`);
+  if (!deployed.url) throw new Error(`Could not find the URL in the deploy output. End of the output:\n${deployed.tail}`);
   const url = deployed.url;
-  log("データベースのマイグレーションを適用します");
+  log("Applying database migrations");
   await migrate(run, d1Name);
 
   let key: string;
@@ -300,12 +300,12 @@ export async function runInit(opts: InitOpts): Promise<{ url: string; key: strin
   if (await savedKeyWorks(existing, url, opts.fetch)) {
     key = existing!.key;
   } else {
-    log("管理キーを作成します");
+    log("Creating the admin key");
     key = generateKey("admin");
     const sql = await bootstrapSql(key, "init", new Date().toISOString());
     // `--command` takes the SQL as one argument: no shell is involved, so quotes and `$` survive.
     const r = await run(["d1", "execute", d1Name, "--remote", "--yes", "--command", sql]);
-    if (r.code !== 0) throw failure("管理キーの登録", r);
+    if (r.code !== 0) throw failure("register the admin key", r);
     keyIsNew = true;
   }
 
@@ -324,8 +324,8 @@ export async function runInit(opts: InitOpts): Promise<{ url: string; key: strin
 function siteOf(profile: string): { profile: Profile; site: Site } {
   const config = loadConfig();
   const p = Object.hasOwn(config.profiles, profile) ? config.profiles[profile] : undefined;
-  if (!p) throw new Error(`プロファイル "${profile}" は登録されていません`);
-  if (!p.site) throw new Error(`プロファイル "${profile}" は femtocms init で作られたものではないため、Cloudflare 側の情報がありません。femtocms init で作り直してください`);
+  if (!p) throw new Error(`The profile "${profile}" is not saved`);
+  if (!p.site) throw new Error(`The profile "${profile}" was not created by femtocms init, so it has no Cloudflare details. Run femtocms init to recreate it`);
   // workerName names a directory under sites/ that destroy removes: never trust what the config file says.
   checkName(String(p.site.workerName));
   return { profile: p, site: p.site };
@@ -345,11 +345,11 @@ export async function runUpgrade(opts: {
   }
   const run = bindSite(opts.runner, site.accountId, writeSiteConfig(site));
   // Migrations first: a new Worker may need the new schema, while the old one keeps working on an added table or column.
-  opts.log("データベースのマイグレーションを適用します");
+  opts.log("Applying database migrations");
   await migrate(run, site.d1Name);
-  opts.log("Worker を更新します（少し時間がかかります）");
+  opts.log("Updating the Worker (this takes a moment)");
   await deploy(run, site, opts.log); // the URL is already saved; wrangler's output is not needed
-  opts.log(`更新しました: ${profile.url}`);
+  opts.log(`Updated: ${profile.url}`);
   return { url: profile.url };
 }
 
@@ -370,10 +370,10 @@ const BUCKET_NOT_EMPTY = /\[code: 10008\]|bucket you tried to delete is not empt
 /** The site was emptied through the API, yet R2 still holds objects no media row points at (e.g. left by an interrupted upload). */
 function bucketNotEmpty(site: Site, r: RunResult): Error {
   return new Error(
-    `R2 バケット ${site.bucket} が空でないため削除できませんでした。サイトを空にした後も、どのメディアにも属さないファイルが R2 に残っています（途中で失敗したアップロードなど）。\n` +
-      "次のどちらかで中身を消してから、もう一度 femtocms destroy を実行してください（Worker・D1・プロファイルはまだ残してあります）:\n" +
-      `  - キーごとに: npx wrangler r2 object delete ${site.bucket}/<key> --remote\n` +
-      `  - ダッシュボードで: https://dash.cloudflare.com/${site.accountId}/r2/default/buckets/${site.bucket}\n` +
+    `Could not delete the R2 bucket ${site.bucket} because it is not empty. After the site was emptied, R2 still holds files that belong to no media (for example from an interrupted upload).\n` +
+      "Delete those files in one of the following ways, then run femtocms destroy again (the Worker, D1 database and profile are still in place):\n" +
+      `  - One key at a time: npx wrangler r2 object delete ${site.bucket}/<key> --remote\n` +
+      `  - In the dashboard: https://dash.cloudflare.com/${site.accountId}/r2/default/buckets/${site.bucket}\n` +
       outputTail(r),
   );
 }
@@ -390,16 +390,16 @@ async function emptySite(client: FemtoClient, siteName: string, log: (s: string)
     await client.request("DELETE", "/api/trash", { query: { confirm: siteName } });
   } catch (e) {
     if (!(e instanceof ApiError)) {
-      log(`サイトに接続できませんでした（${(e as Error).message}）。Worker が既に無いものとして続けます`);
+      log(`Could not connect to the site (${(e as Error).message}). Continuing as if the Worker is already gone`);
       return;
     }
     if (e.status === 404 && e.code.startsWith("http_")) {
-      log("サイトの URL が 404 を返しました。Worker が既に無いものとして続けます");
+      log("The site URL returned 404. Continuing as if the Worker is already gone");
       return;
     }
     throw new Error(
-      `サイトを空にできませんでした（HTTP ${e.status}: ${e.message}）。R2 にデータが残ったまま削除すると後から消せなくなるため、何も削除していません。` +
-        "femtocms login で有効な管理キーを保存し直してから、もう一度 destroy を実行してください",
+      `Could not empty the site (HTTP ${e.status}: ${e.message}). Nothing was deleted: deleting the Worker while data remains in R2 would leave files that can no longer be removed.` +
+        "Save a valid admin key with femtocms login, then run destroy again",
     );
   }
 }
@@ -413,34 +413,34 @@ export async function runDestroy(opts: {
   const { log } = opts;
   const { profile, site } = siteOf(opts.profile);
   const typed = (opts.confirm ?? await opts.prompt.text(
-    `Cloudflare 上の Worker・D1・R2（記事・メディアを含むすべて）を削除します。元には戻せません。\n続けるには Worker 名 "${site.workerName}" を入力してください`,
+    `This deletes the Worker, D1 database and R2 bucket on Cloudflare, including all entries and media. It cannot be undone.\nTo continue, type the Worker name "${site.workerName}"`,
   )).trim();
   if (typed !== site.workerName) {
-    log("入力が一致しないため、何もせずに中止しました");
+    log("The input did not match. Nothing was deleted");
     return false;
   }
 
   // R2 buckets must be empty to be deleted: reset moves everything to the trash, emptying the trash deletes the media objects.
-  log("データを空にします");
+  log("Emptying the site");
   await emptySite(new FemtoClient(profile, opts.fetch), site.workerName, log);
 
   const run = bindSite(opts.runner, site.accountId, writeSiteConfig(site));
   // R2 first: it is the step that can fail on leftover data, and while the Worker still exists a retry can empty it again.
   const steps: [string, keyof typeof ALREADY_GONE, string[]][] = [
-    ["R2 バケット", "r2", ["r2", "bucket", "delete", site.bucket]],
+    ["R2 bucket", "r2", ["r2", "bucket", "delete", site.bucket]],
     ["Worker", "worker", ["delete", "--name", site.workerName, "--force"]],
-    ["D1 データベース", "d1", ["d1", "delete", site.d1Name, "-y"]],
+    ["D1 database", "d1", ["d1", "delete", site.d1Name, "-y"]],
   ];
   for (const [label, kind, args] of steps) {
-    log(`${label}を削除します`);
+    log(`Deleting ${label}`);
     const r = await run(args);
     if (r.code === 0) continue;
     if (ALREADY_GONE[kind].test(`${r.stdout}\n${r.stderr}`)) {
-      log(`  ${label}は既にありませんでした`);
+      log(`  ${label} was already gone`);
       continue;
     }
     if (kind === "r2" && BUCKET_NOT_EMPTY.test(`${r.stdout}\n${r.stderr}`)) throw bucketNotEmpty(site, r);
-    throw failure(`${label}の削除`, r);
+    throw failure(`delete the ${label}`, r);
   }
 
   const config = loadConfig();
@@ -448,7 +448,7 @@ export async function runDestroy(opts: {
   if (config.current === opts.profile) delete config.current;
   saveConfig(config);
   rmSync(dirname(siteConfigPath(site.workerName)), { recursive: true, force: true }); // the generated config
-  log(`削除しました: ${site.workerName}`);
+  log(`Deleted: ${site.workerName}`);
   return true;
 }
 
@@ -457,8 +457,8 @@ export async function runDestroy(opts: {
 /** The prebuilt worker must exist before anything is created in the user's account. */
 function assertBundled(): void {
   const { main, migrationsDir } = bundledPaths();
-  if (!existsSync(main)) throw new Error(`同梱の Worker (${main}) が見つかりません。リポジトリから実行している場合は npm run build:worker を先に実行してください`);
-  if (!existsSync(migrationsDir)) throw new Error(`マイグレーション (${migrationsDir}) が見つかりません`);
+  if (!existsSync(main)) throw new Error(`The bundled Worker (${main}) was not found. If you run from the repository, run npm run build:worker first`);
+  if (!existsSync(migrationsDir)) throw new Error(`The migrations (${migrationsDir}) were not found`);
 }
 
 const stderrLog = (s: string) => void process.stderr.write(s + "\n");
@@ -466,19 +466,19 @@ const stdoutLog = (s: string) => void process.stdout.write(s + "\n");
 
 function profileNameOf(cmd: Command): string {
   const { name, profile } = resolveProfile({ profile: cmd.optsWithGlobals().profile as string | undefined, cwd: process.cwd(), env: process.env });
-  if (!profile.site) throw new Error("このプロファイルは femtocms init で作られたものではありません。femtocms init で作り直してください");
+  if (!profile.site) throw new Error("This profile was not created by femtocms init. Run femtocms init to recreate it");
   return name;
 }
 
-const corsHelp = "/api と /media を読めるブラウザのオリジン（カンマ区切り、例: https://www.example.com）。空文字ですべてのオリジンを許可（既定）";
+const corsHelp = "Browser origins allowed to read /api and /media (comma-separated, e.g. https://www.example.com). An empty string allows every origin (default)";
 
 export function registerDeploy(program: Command): void {
   program
     .command("init")
-    .description("自分の Cloudflare アカウントに femtocms をデプロイして接続情報を保存します（何度実行しても安全です）")
-    .option("--name <name>", "Worker・D1・R2 とプロファイルの名前", "femtocms")
-    .option("--account <id>", "使う Cloudflare アカウントの ID（既定は環境変数 CLOUDFLARE_ACCOUNT_ID。どちらもなく複数あれば選ばせる）")
-    .option("--domain <host>", "独自ドメイン（例: cms.example.com。そのドメインが Cloudflare の管理下にあること）")
+    .description("Deploy femtocms to your Cloudflare account and save the connection (safe to run again)")
+    .option("--name <name>", "Name for the Worker, D1 database, R2 bucket and profile", "femtocms")
+    .option("--account <id>", "ID of the Cloudflare account to use (default: the CLOUDFLARE_ACCOUNT_ID environment variable; if neither is set and there are several accounts, you are asked)")
+    .option("--domain <host>", "Custom domain, e.g. cms.example.com (the domain must be on Cloudflare)")
     .option("--cors-origins <a,b>", corsHelp)
     .action(
       guarded(async (o: { name: string; account?: string; domain?: string; corsOrigins?: string }, cmd: Command) => {
@@ -496,8 +496,8 @@ export function registerDeploy(program: Command): void {
 
   program
     .command("upgrade")
-    .description("マイグレーションを適用してから、同梱の最新の Worker をデプロイします")
-    .option("--cors-origins <a,b>", `${corsHelp}。省略時は保存済みの設定のまま`)
+    .description("Apply database migrations, then deploy the Worker bundled with this package")
+    .option("--cors-origins <a,b>", `${corsHelp}. If omitted, the saved setting is kept`)
     .action(
       guarded(async (o: { corsOrigins?: string }, cmd: Command) => {
         assertBundled();
@@ -511,8 +511,8 @@ export function registerDeploy(program: Command): void {
 
   program
     .command("destroy")
-    .description("Cloudflare 上の Worker・D1・R2 をすべて削除します（Worker 名の入力が必要）")
-    .option("--confirm <worker-name>", "入力のかわりに Worker 名を渡す（一致しなければ何もしない。AI や CI から実行するとき用）")
+    .description("Delete the Worker, D1 database and R2 bucket on Cloudflare (you must type the Worker name)")
+    .option("--confirm <worker-name>", "Worker name given up front instead of typed (nothing is deleted if it does not match; for AI agents and CI)")
     .action(
       guarded(async (o: { confirm?: string }, cmd: Command) => {
         const json = isJson(cmd);

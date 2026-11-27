@@ -21,7 +21,7 @@ export function packageRoot(from: string = import.meta.url): string {
       // no (readable) package.json here: keep walking
     }
     const parent = dirname(dir);
-    if (parent === dir) throw new Error("femtocms のパッケージルートが見つかりません");
+    if (parent === dir) throw new Error("Could not find the femtocms package root");
     dir = parent;
   }
 }

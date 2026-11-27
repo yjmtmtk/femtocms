@@ -22,20 +22,20 @@ beforeEach(async () => {
   });
 });
 
-describe("エントリ", () => {
-  it("削除するとゴミ箱へ移り、一覧にも取得にも出ない", async () => {
+describe("Entries", () => {
+  it("deleting moves the entry to the trash, and it no longer appears in lists or gets", async () => {
     const e = await createEntry(admin(), "news", { data: { title: "a" }, slug: "a", status: "published" });
     await trashEntry(admin(), "news", e.id);
     expect((await listEntryRecords(pub(), "news", {})).total).toBe(0);
     await expect(getEntryRecord(admin(), "news", e.id)).rejects.toMatchObject({ code: "not_found" });
     expect(await listTrash(admin())).toEqual([expect.objectContaining({ type: "entry", id: e.id, title: "a", collection: "news" })]);
   });
-  it("slug でも削除でき、既に削除済みなら not_found", async () => {
+  it("can also be deleted by slug; an already deleted entry gives not_found", async () => {
     await createEntry(admin(), "news", { data: { title: "a" }, slug: "a" });
     await trashEntry(admin(), "news", "a");
     await expect(trashEntry(admin(), "news", "a")).rejects.toMatchObject({ code: "not_found" });
   });
-  it("title は最初の text フィールド、無ければ slug、それも無ければ id", async () => {
+  it("title is the first text field, else the slug, else the id", async () => {
     await createCollection(admin(), { name: "memo", fields: [{ name: "body", type: "markdown" }, { name: "head", type: "text" }] });
     const a = await createEntry(admin(), "memo", { data: { body: "x", head: "見出し" }, slug: "s1" });
     const b = await createEntry(admin(), "memo", { data: { body: "x" }, slug: "s2" });
@@ -44,7 +44,7 @@ describe("エントリ", () => {
     const titles = Object.fromEntries((await listTrash(admin())).map(t => [t.id, t.title]));
     expect(titles).toEqual({ [a.id]: "見出し", [b.id]: "s2", [c.id]: c.id });
   });
-  it("復元すると公開状態に戻る", async () => {
+  it("restoring brings back the published state", async () => {
     const e = await createEntry(admin(), "news", { data: { title: "a" }, status: "published" });
     await trashEntry(admin(), "news", e.id);
     const item = await restoreFromTrash(admin(), e.id);
@@ -52,35 +52,35 @@ describe("エントリ", () => {
     expect((await getEntryRecord(pub(), "news", e.id)).status).toBe("published");
     expect(await listTrash(admin())).toEqual([]);
   });
-  it("ゴミ箱の slug は再利用できず、hint で理由が分かる", async () => {
+  it("a slug in the trash cannot be reused, and the hint explains why", async () => {
     const e = await createEntry(admin(), "news", { data: { title: "a" }, slug: "a" });
     await trashEntry(admin(), "news", e.id);
     await expect(createEntry(admin(), "news", { data: { title: "b" }, slug: "a" }))
-      .rejects.toMatchObject({ code: "conflict", hint: expect.stringMatching(/trash|ゴミ箱/) });
+      .rejects.toMatchObject({ code: "conflict", hint: expect.stringMatching(/trash/) });
   });
-  it("ゴミ箱でない slug の衝突は、ゴミ箱に触れない hint（作成・更新とも）", async () => {
+  it("a clash with a slug that is not in the trash gets a hint that does not mention the trash (on create and update)", async () => {
     await createEntry(admin(), "news", { data: { title: "a" }, slug: "a" });
-    const hint = expect.not.stringMatching(/trash|ゴミ箱/);
+    const hint = expect.not.stringMatching(/trash/);
     await expect(createEntry(admin(), "news", { data: { title: "b" }, slug: "a" }))
       .rejects.toMatchObject({ code: "conflict", hint });
     const b = await createEntry(admin(), "news", { data: { title: "b" }, slug: "b" });
     await expect(updateEntry(admin(), "news", b.id, { slug: "a" })).rejects.toMatchObject({ code: "conflict", hint });
   });
-  it("更新で、ゴミ箱の slug を取ろうとしてもゴミ箱の hint", async () => {
+  it("updating to a slug held in the trash also gets the trash hint", async () => {
     const gone = await createEntry(admin(), "news", { data: { title: "g" }, slug: "g" });
     await trashEntry(admin(), "news", gone.id);
     const b = await createEntry(admin(), "news", { data: { title: "b" }, slug: "b" });
     await expect(updateEntry(admin(), "news", b.id, { slug: "g" }))
-      .rejects.toMatchObject({ code: "conflict", hint: expect.stringMatching(/trash|ゴミ箱/) });
+      .rejects.toMatchObject({ code: "conflict", hint: expect.stringMatching(/trash/) });
   });
-  it("親がゴミ箱でないエントリは普通に戻る。親がゴミ箱なら conflict で先にコレクションを戻すよう案内", async () => {
+  it("an entry whose parent is not in the trash is restored normally; if the parent is in the trash, conflict tells the caller to restore the collection first", async () => {
     const e = await createEntry(admin(), "news", { data: { title: "a" } });
     await trashEntry(admin(), "news", e.id);
     await trashCollection(admin(), "news");
     await expect(restoreFromTrash(admin(), e.id))
-      .rejects.toMatchObject({ code: "conflict", hint: expect.stringContaining("先にコレクション news を復元") });
+      .rejects.toMatchObject({ code: "conflict", hint: expect.stringContaining("Restore collection news first") });
   });
-  it("single コレクションで既に別のエントリがあると復元は conflict", async () => {
+  it("restoring into a single collection that already has another entry gives conflict", async () => {
     await createCollection(admin(), { name: "site", kind: "single", fields: [{ name: "t", type: "text" }] });
     const first = await createEntry(admin(), "site", { data: { t: "1" } });
     await trashEntry(admin(), "site", first.id);
@@ -89,8 +89,8 @@ describe("エントリ", () => {
   });
 });
 
-describe("コレクション", () => {
-  it("コレクション削除は配下を巻き込み、復元で一緒に戻る。先に個別削除した物は戻らない", async () => {
+describe("Collections", () => {
+  it("deleting a collection takes its entries along, and restoring brings them back together; entries deleted individually earlier stay in the trash", async () => {
     const keep = await createEntry(admin(), "news", { data: { title: "k" } });
     const gone = await createEntry(admin(), "news", { data: { title: "g" } });
     await trashEntry(admin(), "news", gone.id);
@@ -104,12 +104,12 @@ describe("コレクション", () => {
     await expect(getEntryRecord(admin(), "news", gone.id)).rejects.toMatchObject({ code: "not_found" });
     expect(await row("entries", keep.id)).toMatchObject({ deleted_at: null, trashed_with: null });
   });
-  it("配下だけでなく一覧には出ない（trashed_with 付きは親に含める）", async () => {
+  it("child entries do not show up in the list on their own (those with trashed_with are included under the parent)", async () => {
     await createEntry(admin(), "news", { data: { title: "k" } });
     await trashCollection(admin(), "news");
     expect(await listTrash(admin())).toEqual([expect.objectContaining({ type: "collection", title: "news" })]);
   });
-  it("完全削除すると配下のエントリ（ゴミ箱の物も）がすべて消える", async () => {
+  it("permanent deletion removes all child entries (including those in the trash)", async () => {
     const a = await createEntry(admin(), "news", { data: { title: "a" } });
     const b = await createEntry(admin(), "news", { data: { title: "b" } });
     await trashEntry(admin(), "news", b.id);
@@ -122,8 +122,8 @@ describe("コレクション", () => {
   });
 });
 
-describe("メディア", () => {
-  it("ゴミ箱の画像は配信されず、復元すると配信される", async () => {
+describe("Media", () => {
+  it("a trashed image is not served, and is served again after restore", async () => {
     const m = await uploadMedia(admin(), { bytes: fixtures.png, filename: "a.png" });
     expect((await SELF.fetch(mediaUrl("https://cms.test", m))).status).toBe(200);
     await trashMedia(admin(), m.id);
@@ -132,7 +132,7 @@ describe("メディア", () => {
     await restoreFromTrash(admin(), m.id);
     expect((await SELF.fetch(mediaUrl("https://cms.test", m))).status).toBe(200);
   });
-  it("完全削除すると R2 からも消える。参照しているエントリはそのまま", async () => {
+  it("permanent deletion also removes it from R2; entries that reference it are untouched", async () => {
     const m = await uploadMedia(admin(), { bytes: fixtures.png, filename: "a.png" });
     await trashMedia(admin(), m.id);
     await deletePermanently(admin(), m.id, "dev-site");
@@ -141,29 +141,29 @@ describe("メディア", () => {
   });
 });
 
-describe("完全削除・空にする", () => {
-  it("ゴミ箱に無い物は bad_request（hint つき）、存在しなければ not_found", async () => {
+describe("permanent delete and empty trash", () => {
+  it("an item not in the trash gives bad_request (with a hint); a missing one gives not_found", async () => {
     const e = await createEntry(admin(), "news", { data: { title: "a" } });
     await expect(deletePermanently(admin(), e.id, "dev-site"))
-      .rejects.toMatchObject({ code: "bad_request", hint: expect.stringContaining("ゴミ箱") });
+      .rejects.toMatchObject({ code: "bad_request", hint: expect.stringContaining("trash") });
     await expect(deletePermanently(admin(), "e_000000000000", "dev-site")).rejects.toMatchObject({ code: "not_found" });
     expect(await row("entries", e.id)).not.toBeNull();
   });
-  it("完全削除には confirm が要る", async () => {
+  it("permanent deletion needs confirm", async () => {
     const e = await createEntry(admin(), "news", { data: { title: "a" } });
     await trashEntry(admin(), "news", e.id);
     await expect(deletePermanently(admin(), e.id, undefined)).rejects.toMatchObject({ code: "confirmation_required" });
     await deletePermanently(admin(), e.id, "dev-site");
     expect(await row("entries", e.id)).toBeNull();
   });
-  it("空にするには confirm にサイト名が要る。空にすると R2 からも消える", async () => {
+  it("emptying the trash needs the site name as confirm, and also removes the files from R2", async () => {
     const m = await uploadMedia(admin(), { bytes: fixtures.png, filename: "a.png" });
     await trashMedia(admin(), m.id);
     await expect(emptyTrash(admin(), "wrong")).rejects.toMatchObject({ code: "confirmation_required" });
     expect(await emptyTrash(admin(), "dev-site")).toEqual({ deleted: 1 });
     expect(await env.MEDIA.get(`media/${m.id}`)).toBeNull();
   });
-  it("空にしても有効な物は残り、コレクションと配下は消える", async () => {
+  it("emptying keeps active items, and removes collections and their children", async () => {
     const liveMedia = await uploadMedia(admin(), { bytes: fixtures.png, filename: "live.png" });
     const trashedMedia = await uploadMedia(admin(), { bytes: fixtures.gif, filename: "t.gif" });
     await trashMedia(admin(), trashedMedia.id);
@@ -186,8 +186,8 @@ describe("完全削除・空にする", () => {
   });
 });
 
-describe("一覧と権限", () => {
-  it("新しい順に並ぶ", async () => {
+describe("list and permissions", () => {
+  it("sorted newest first", async () => {
     const a = await createEntry(admin(), "news", { data: { title: "a" } });
     const b = await createEntry(admin(), "news", { data: { title: "b" } });
     const ctx = admin();
@@ -197,7 +197,7 @@ describe("一覧と権限", () => {
     await trashEntry(ctx, "news", b.id);
     expect((await listTrash(admin())).map(i => i.id)).toEqual([b.id, a.id]);
   });
-  it("admin 以外は使えない", async () => {
+  it("only admin can use it", async () => {
     const e = await createEntry(admin(), "news", { data: { title: "a" } });
     await expect(trashEntry(pub(), "news", e.id)).rejects.toMatchObject({ code: "unauthorized" });
     await expect(trashEntry(reader(), "news", e.id)).rejects.toMatchObject({ code: "forbidden" });
@@ -208,7 +208,7 @@ describe("一覧と権限", () => {
     await expect(deletePermanently(reader(), e.id, "dev-site")).rejects.toMatchObject({ code: "forbidden" });
     await expect(emptyTrash(pub(), "dev-site")).rejects.toMatchObject({ code: "unauthorized" });
   });
-  it("書き込み系は bumpVersion を1回ずつ呼ぶ", async () => {
+  it("each write calls bumpVersion once", async () => {
     const e = await createEntry(admin(), "news", { data: { title: "a" } });
     const m = await uploadMedia(admin(), { bytes: fixtures.png, filename: "a.png" });
     const step = async (fn: () => Promise<unknown>) => {
@@ -224,7 +224,7 @@ describe("一覧と権限", () => {
     await step(async () => deletePermanently(admin(), (await listTrash(admin())).find(t => t.type === "collection")!.id, "dev-site"));
     await step(() => emptyTrash(admin(), "dev-site"));
   });
-  it("接頭辞が不明な id は bad_request、ゴミ箱に無い id は not_found", async () => {
+  it("an id with an unknown prefix gives bad_request; an id not in the trash gives not_found", async () => {
     await expect(restoreFromTrash(admin(), "zzz")).rejects.toMatchObject({ code: "bad_request" });
     await expect(restoreFromTrash(admin(), "e_000000000000")).rejects.toMatchObject({ code: "not_found" });
     const e = await createEntry(admin(), "news", { data: { title: "a" } });

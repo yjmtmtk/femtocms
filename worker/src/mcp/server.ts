@@ -37,7 +37,7 @@ async function run(fn: () => Promise<Record<string, unknown>>): Promise<CallTool
 }
 
 const invalid = (path: string, message: string, expected: string, received: unknown) =>
-  new FemtoError("validation_failed", "入力が不正です", { issues: [{ path, message, expected, received }] });
+  new FemtoError("validation_failed", "Invalid input", { issues: [{ path, message, expected, received }] });
 
 const trashNote = "This moves the item to the trash. It can be restored with restore_from_trash.";
 
@@ -194,8 +194,8 @@ export function buildMcpServer(ctx: Ctx): McpServer {
   }, ({ collection: name, id }) => run(async () => {
     const collection = await getCollection(ctx, name);
     if (id === undefined && collection.kind !== "single") {
-      throw new FemtoError("bad_request", `コレクション "${name}" は list なので id が必要です`, {
-        hint: "id (または slug) を指定してください。id は list_entries で調べられます",
+      throw new FemtoError("bad_request", `Collection "${name}" is a list collection, so id is required`, {
+        hint: "Pass id (or slug). Call list_entries to find the id.",
       });
     }
     const record = id === undefined ? await getSingle(ctx, name) : await getEntryRecord(ctx, name, id);
@@ -276,7 +276,7 @@ export function buildMcpServer(ctx: Ctx): McpServer {
     },
   }, ({ collection, id, ttlSeconds }) => run(async () => {
     if (ttlSeconds !== undefined && !(Number.isInteger(ttlSeconds) && ttlSeconds >= 1 && ttlSeconds <= MAX_PREVIEW_TTL_SECONDS)) {
-      throw invalid("ttlSeconds", `ttlSeconds は 1〜${MAX_PREVIEW_TTL_SECONDS} の整数（秒）です`, `integer 1..${MAX_PREVIEW_TTL_SECONDS}`, ttlSeconds);
+      throw invalid("ttlSeconds", `ttlSeconds must be an integer from 1 to ${MAX_PREVIEW_TTL_SECONDS} (seconds)`, `integer 1..${MAX_PREVIEW_TTL_SECONDS}`, ttlSeconds);
     }
     return { ...(await createPreviewUrl(ctx, collection, id, { ttlSeconds })) };
   }));
@@ -297,12 +297,12 @@ export function buildMcpServer(ctx: Ctx): McpServer {
     },
   }, ({ url, base64, filename, mimeType, alt }) => run(async () => {
     if ((url === undefined) === (base64 === undefined)) {
-      throw new FemtoError("bad_request", "url か base64 のどちらか一方だけを指定してください", {
-        hint: "公開 URL があれば url、無ければ base64 と filename を渡してください",
+      throw new FemtoError("bad_request", "Pass only one of url and base64", {
+        hint: "Use url if the file has a public URL. Otherwise pass base64 and filename.",
       });
     }
     if (base64 !== undefined && filename === undefined) {
-      throw new FemtoError("bad_request", "base64 を使うときは filename が必要です", { hint: 'filename に "photo.png" のような拡張子付きの名前を指定してください' });
+      throw new FemtoError("bad_request", "filename is required when base64 is used", { hint: 'Set filename to a name with an extension, such as "photo.png".' });
     }
     const media = url !== undefined
       ? await importMediaFromUrl(ctx, { url, filename, alt })
@@ -441,7 +441,7 @@ mcpApp.all("/", async (c) => {
   }
   if (c.req.method !== "POST") {
     return Response.json(
-      { error: { code: "method_not_allowed", message: "POST で JSON-RPC リクエストを送ってください", hint: "この MCP サーバはステートレスで、GET (SSE) と DELETE は使えません" } },
+      { error: { code: "method_not_allowed", message: "Send the JSON-RPC request with POST", hint: "This MCP server is stateless, so GET (SSE) and DELETE are not supported." } },
       { status: 405, headers: { Allow: "POST" } },
     );
   }

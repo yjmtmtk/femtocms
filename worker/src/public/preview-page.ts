@@ -16,7 +16,7 @@ const CSS =
 
 function renderValue(f: FieldDef, entry: ApiEntry): string {
   const v = Object.hasOwn(entry.data, f.name) ? entry.data[f.name] : undefined;
-  if (v === undefined || v === null || v === "") return '<p class="v none">（未入力）</p>';
+  if (v === undefined || v === null || v === "") return '<p class="v none">(empty)</p>';
   if (f.type === "markdown" && typeof v === "string") {
     // entry.html is already-sanitized markdown output: the only raw HTML on the page.
     return `<div class="v">${Object.hasOwn(entry.html, f.name) ? entry.html[f.name] : esc(v)}</div>`;
@@ -34,10 +34,10 @@ export function renderPreviewPage(collection: Collection, entry: ApiEntry): stri
     .map((f) => `<section><h2>${esc(f.label ?? f.name)}</h2>${renderValue(f, entry)}</section>`)
     .join("");
   return (
-    `<!doctype html><html lang="ja"><head><meta charset="utf-8">` +
+    `<!doctype html><html><head><meta charset="utf-8">` +
     `<meta name="viewport" content="width=device-width,initial-scale=1">` +
     `<meta name="robots" content="noindex"><title>${esc(heading)} (preview)</title>` +
     `<style>${CSS}</style></head><body>` +
-    `<div class="band">プレビュー（下書き）</div><main><h1>${esc(heading)}</h1>${fields}</main></body></html>`
+    `<div class="band">Preview (draft)</div><main><h1>${esc(heading)}</h1>${fields}</main></body></html>`
   );
 }

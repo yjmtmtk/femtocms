@@ -35,11 +35,11 @@ export async function createKey(
   requireRole(ctx, "admin");
   const checked = checkKeyName(input?.name);
   if (!checked.ok) {
-    throw new FemtoError("validation_failed", "キーの名前が不正です", { issues: [{ path: "name", message: checked.message }] });
+    throw new FemtoError("validation_failed", "Invalid key name", { issues: [{ path: "name", message: checked.message }] });
   }
   if (input.role !== "admin" && input.role !== "read") {
-    throw new FemtoError("validation_failed", "キーの role が不正です", {
-      issues: [{ path: "role", message: 'role は "admin" か "read" です', expected: "admin | read", received: input.role }],
+    throw new FemtoError("validation_failed", "Invalid key role", {
+      issues: [{ path: "role", message: 'role must be "admin" or "read"', expected: "admin | read", received: input.role }],
     });
   }
   const key = generateKey(input.role);
@@ -68,7 +68,7 @@ const fetchKey = (ctx: Ctx, id: string) =>
 export async function revokeKey(ctx: Ctx, id: string): Promise<ApiKeyInfo> {
   requireRole(ctx, "admin");
   const existing = await fetchKey(ctx, id);
-  if (!existing) throw new FemtoError("not_found", `キー "${id}" が見つかりません`, { hint: "list_keys で一覧を確認してください" });
+  if (!existing) throw new FemtoError("not_found", `Key "${id}" not found`, { hint: "Call list_keys to see the existing keys." });
   if (existing.revoked_at) return toInfo(existing);
 
   const res = await ctx.db
@@ -80,16 +80,16 @@ export async function revokeKey(ctx: Ctx, id: string): Promise<ApiKeyInfo> {
     .run();
   const after = (await fetchKey(ctx, id))!;
   if (res.meta.changes === 0 && !after.revoked_at) {
-    throw new FemtoError("conflict", "最後の有効な管理キーは revoke できません", {
-      hint: "先に別の管理キーを作成してから revoke してください",
+    throw new FemtoError("conflict", "Cannot revoke the last active admin key", {
+      hint: "Create another admin key first, then revoke this one.",
     });
   }
   return toInfo(after);
 }
 
 const unauthorized = () =>
-  new FemtoError("unauthorized", "APIキーが無効です", {
-    hint: "Authorization: Bearer <APIキー> を確認してください（revoke 済みのキーは使えません）",
+  new FemtoError("unauthorized", "Invalid API key", {
+    hint: "Check the header Authorization: Bearer <API key>. A revoked key cannot be used.",
   });
 
 const TOUCH_INTERVAL_MS = 60_000;

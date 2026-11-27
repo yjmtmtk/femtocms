@@ -13,34 +13,34 @@ const F: FieldDef[] = [
 ];
 
 describe("validateData", () => {
-  it("正しい入力は正規化される", () => {
+  it("valid input is normalized", () => {
     const r = validateData(F, { title: "hi", cover: { id: "m_aaaaaaaaaaaa", url: "x" }, at: "2026-01-02T03:04:05+09:00" }, { enforceRequired: true });
     expect(r.issues).toEqual([]);
     expect(r.data).toEqual({ title: "hi", cover: "m_aaaaaaaaaaaa", at: "2026-01-01T18:04:05.000Z", flag: false });
     expect(r.refs.media).toEqual(["m_aaaaaaaaaaaa"]);
   });
 
-  it("下書きでは required を問わないが型は検証する", () => {
+  it("a draft does not require required fields but still validates types", () => {
     const r = validateData(F, { n: 1.5 }, { enforceRequired: false });
     expect(r.issues).toEqual([expect.objectContaining({ path: "data.n", expected: expect.stringContaining("integer") })]);
   });
 
-  it("公開時は required 欠落を報告する", () => {
+  it("on publish, missing required fields are reported", () => {
     expect(validateData(F, {}, { enforceRequired: true }).issues).toContainEqual(expect.objectContaining({ path: "data.title" }));
   });
 
-  it("未知のフィールドは使えるフィールド一覧つきで報告", () => {
+  it("an unknown field is reported together with the list of usable fields", () => {
     const r = validateData(F, { titel: "x" }, { enforceRequired: false });
     expect(r.issues[0]).toMatchObject({ path: "data.titel", message: expect.stringContaining("unknown field"), expected: expect.stringContaining("title") });
     expect(r.data).not.toHaveProperty("titel");
   });
 
-  it("maxLength・select・list の入れ子の path", () => {
+  it("paths for maxLength, select and nested list", () => {
     const r = validateData(F, { title: "toolong", tags: ["c"], faq: [{ q: "ok" }, {}] }, { enforceRequired: true });
     expect(r.issues.map(i => i.path)).toEqual(["data.title", "data.tags[0]", "data.faq[1].q"]);
   });
 
-  it("オブジェクト以外の入力は data の issue", () => {
+  it("non-object input is an issue on data", () => {
     for (const bad of [null, "x", 1, [], undefined]) {
       expect(validateData(F, bad, { enforceRequired: false }).issues).toEqual([
         expect.objectContaining({ path: "data", message: "object required" }),
@@ -48,13 +48,13 @@ describe("validateData", () => {
     }
   });
 
-  it("ignoreUnknown では未知キーを報告せず data からも落とす", () => {
+  it("with ignoreUnknown, unknown keys are not reported and are dropped from data", () => {
     const r = validateData(F, { title: "hi", old: 1, faq: [{ q: "a", gone: 1 }] }, { enforceRequired: true, ignoreUnknown: true });
     expect(r.issues).toEqual([]);
     expect(r.data).toEqual({ title: "hi", faq: [{ q: "a" }], flag: false });
   });
 
-  it("型ごとの不正値を報告する", () => {
+  it("invalid values are reported per type", () => {
     const r = validateData(
       [
         { name: "a", type: "boolean" },
@@ -76,7 +76,7 @@ describe("validateData", () => {
     expect(r.issues.every(i => typeof i.expected === "string" && i.expected.length > 0)).toBe(true);
   });
 
-  it("参照とメディアを refs に集める（list の中も、重複は除く）", () => {
+  it("references and media are collected into refs (also inside list, without duplicates)", () => {
     const fields: FieldDef[] = [
       { name: "author", type: "reference", collection: "people" },
       { name: "cover", type: "image" },
@@ -96,7 +96,7 @@ describe("validateData", () => {
     ]);
   });
 
-  it("image multiple: id / { id } の配列を id 文字列に正規化し、各要素を refs に集める", () => {
+  it("image multiple: an array of id / { id } is normalized to id strings, and each element is collected into refs", () => {
     const fields: FieldDef[] = [{ name: "gallery", type: "image", multiple: true }];
     const r = validateData(fields, { gallery: ["m_aaaaaaaaaaaa", { id: "m_bbbbbbbbbbbb" }, "m_aaaaaaaaaaaa"] }, { enforceRequired: true });
     expect(r.issues).toEqual([]);
@@ -107,7 +107,7 @@ describe("validateData", () => {
     });
     expect(validateData(fields, { gallery: [] }, { enforceRequired: true }).data.gallery).toEqual([]);
   });
-  it("image multiple: 配列でない値と不正な要素を報告し、multiple でない image は配列を拒否する", () => {
+  it("image multiple: a non-array value and invalid elements are reported, and an image that is not multiple rejects an array", () => {
     const fields: FieldDef[] = [{ name: "gallery", type: "image", multiple: true }];
     const notArray = validateData(fields, { gallery: "m_aaaaaaaaaaaa" }, { enforceRequired: false });
     expect(notArray.issues).toEqual([expect.objectContaining({ path: "data.gallery", expected: expect.stringContaining("array") })]);
@@ -117,7 +117,7 @@ describe("validateData", () => {
     const single = validateData([{ name: "cover", type: "image" }], { cover: ["m_aaaaaaaaaaaa"] }, { enforceRequired: false });
     expect(single.issues).toEqual([expect.objectContaining({ path: "data.cover" })]);
   });
-  it("reference multiple: 配列を検証し、list の中も含めて refs と path を集め、[] は required で未入力扱い", () => {
+  it("reference multiple: validates the array, collects refs and paths including inside list, and treats [] as empty for required", () => {
     const fields: FieldDef[] = [
       { name: "related", type: "reference", collection: "news", multiple: true, required: true },
       { name: "faq", type: "list", fields: [{ name: "images", type: "image", multiple: true }] },
@@ -136,7 +136,7 @@ describe("validateData", () => {
     expect(badEl.issues).toEqual([expect.objectContaining({ path: "data.related[1]" })]);
   });
 
-  it("select multiple・json・default の扱い", () => {
+  it("handling of select multiple, json and default", () => {
     const fields: FieldDef[] = [
       { name: "tags", type: "select", options: ["a", "b"], multiple: true },
       { name: "meta", type: "json" },
@@ -150,7 +150,7 @@ describe("validateData", () => {
     expect(bad.issues.map(i => i.path)).toEqual(["data.tags", "data.body"]);
   });
 
-  it("datetime は ISO 8601 のみ受け付ける", () => {
+  it("datetime accepts only ISO 8601", () => {
     const f: FieldDef[] = [{ name: "at", type: "datetime" }];
     expect(validateData(f, { at: "2026-01-02" }, { enforceRequired: false }).data.at).toBe("2026-01-02T00:00:00.000Z");
     expect(validateData(f, { at: "Jan 2 2026" }, { enforceRequired: false }).issues).toHaveLength(1);
@@ -158,12 +158,12 @@ describe("validateData", () => {
     expect(validateData(f, { at: 1767225600000 }, { enforceRequired: false }).issues).toHaveLength(1);
   });
 
-  it("list の要素がオブジェクトでなければ要素の path で報告", () => {
+  it("a list element that is not an object is reported with the element path", () => {
     const r = validateData(F, { faq: [{ q: "a" }, "x"] }, { enforceRequired: true, ignoreUnknown: false });
     expect(r.issues).toContainEqual(expect.objectContaining({ path: "data.faq[1]" }));
   });
 
-  it("null は「クリア」として issue なしで受け付け、data から落とす", () => {
+  it("null is accepted as a clear without an issue and is dropped from data", () => {
     const fields: FieldDef[] = [
       { name: "cover", type: "image" },
       { name: "meta", type: "json" },
@@ -175,7 +175,7 @@ describe("validateData", () => {
     expect(r.data).toEqual({});
   });
 
-  it("required は 欠落・null・空文字・空配列 をすべて欠落として報告する", () => {
+  it("required reports missing, null, empty string and empty array all as missing", () => {
     const fields: FieldDef[] = [
       { name: "title", type: "text", required: true },
       { name: "tags", type: "select", options: ["a"], multiple: true, required: true },
@@ -183,13 +183,13 @@ describe("validateData", () => {
     ];
     const r = validateData(fields, { title: "", tags: [], cover: null }, { enforceRequired: true });
     expect(r.issues.map(i => [i.path, i.message])).toEqual([["data.title", "required"], ["data.tags", "required"], ["data.cover", "required"]]);
-    // 下書きでは required を問わない（"" は値として保持される）
+    // a draft does not require required fields ("" is kept as a value)
     const draft = validateData(fields, { title: "", tags: [] }, { enforceRequired: false });
     expect(draft.issues).toEqual([]);
     expect(draft.data).toEqual({ title: "", tags: [] });
   });
 
-  it("datetime はカレンダー上存在しない日付を拒否する", () => {
+  it("datetime rejects dates that do not exist on the calendar", () => {
     const f: FieldDef[] = [{ name: "at", type: "datetime" }];
     for (const bad of ["2026-02-31T00:00:00Z", "2026-02-31", "2026-04-31", "2025-02-29", "2026-00-10", "2026-01-00"]) {
       expect(validateData(f, { at: bad }, { enforceRequired: false }).issues).toHaveLength(1);

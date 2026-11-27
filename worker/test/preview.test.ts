@@ -24,8 +24,8 @@ beforeEach(async () => {
   });
 });
 
-describe("プレビューページ", () => {
-  it("下書きをプレビュー URL で見られ、タイトルの HTML はエスケープされる", async () => {
+describe("preview page", () => {
+  it("a draft can be viewed at the preview URL, and HTML in the title is escaped", async () => {
     const e = await createEntry(admin(), "news", { data: { title: "<script>alert(1)</script>", body: "**太字**" } });
     const { url } = await createPreviewUrl(admin(), "news", e.id);
     expect(url).toMatch(/^https:\/\/cms\.test\/preview\/[\w-]+\.[\w-]+$/);
@@ -36,10 +36,10 @@ describe("プレビューページ", () => {
     expect(html).not.toContain("<script>");
     expect(html).toContain("<strong>太字</strong>");
     expect(html).toContain('name="robots" content="noindex"');
-    expect(html).toContain("プレビュー（下書き）");
+    expect(html).toContain("Preview (draft)");
   });
 
-  it("HTML・キャッシュ・クロール・CSP のヘッダが付く", async () => {
+  it("HTML, cache, crawl and CSP headers are set", async () => {
     const e = await createEntry(admin(), "news", { data: { title: "a" } });
     const res = await SELF.fetch((await createPreviewUrl(admin(), "news", e.id)).url);
     expect(res.headers.get("Content-Type")).toBe("text/html; charset=utf-8");
@@ -48,7 +48,7 @@ describe("プレビューページ", () => {
     expect(res.headers.get("Content-Security-Policy")).toBe("default-src 'none'; img-src 'self' https: data:; style-src 'unsafe-inline'");
   });
 
-  it("期限切れ・改ざん・壊れたトークンは 401（HTML ではなく JSON でもない短い本文、no-store）", async () => {
+  it("an expired, tampered or broken token gives 401 (a short body that is neither HTML nor JSON, no-store)", async () => {
     const e = await createEntry(admin(), "news", { data: { title: "a" } });
     const other = await createEntry(admin(), "news", { data: { title: "b" } });
     const { token } = await createPreviewUrl(admin(), "news", e.id, { ttlSeconds: -1 });
@@ -64,7 +64,7 @@ describe("プレビューページ", () => {
     }
   });
 
-  it("verifyPreviewToken: 正しいトークンは entryId を返し、壊れたものは unauthorized", async () => {
+  it("verifyPreviewToken: a valid token returns entryId, a broken one is unauthorized", async () => {
     const e = await createEntry(admin(), "news", { data: { title: "a" } });
     const { token, expiresAt } = await createPreviewUrl(admin(), "news", e.id);
     expect(await verifyPreviewToken(pub(), token)).toEqual({ entryId: e.id });
@@ -76,14 +76,14 @@ describe("プレビューページ", () => {
     }
   });
 
-  it("秘密鍵が変わると既存トークンは無効になる", async () => {
+  it("existing tokens become invalid when the secret key changes", async () => {
     const e = await createEntry(admin(), "news", { data: { title: "a" } });
     const { token } = await createPreviewUrl(admin(), "news", e.id);
     await setSetting(admin(), "preview_secret", "00".repeat(32));
     await expect(verifyPreviewToken(pub(), token)).rejects.toMatchObject({ code: "unauthorized" });
   });
 
-  it("秘密鍵は初回に 1 つだけ作られ、同時に発行しても同じ鍵に収束する", async () => {
+  it("the secret key is created only once, and concurrent issuing converges on the same key", async () => {
     const e = await createEntry(admin(), "news", { data: { title: "a" } });
     expect(await getSetting(admin(), "preview_secret")).toBeNull();
     const made = await Promise.all([1, 2, 3, 4, 5].map(() => createPreviewUrl(admin(), "news", e.id)));
@@ -92,7 +92,7 @@ describe("プレビューページ", () => {
     for (const { token } of made) expect(await verifyPreviewToken(pub(), token)).toEqual({ entryId: e.id });
   });
 
-  it("ゴミ箱に入れた記事のプレビューは 404", async () => {
+  it("the preview of a trashed entry gives 404", async () => {
     const e = await createEntry(admin(), "news", { data: { title: "a" } });
     const { url, token } = await createPreviewUrl(admin(), "news", e.id);
     await trashEntry(admin(), "news", e.id);
@@ -102,14 +102,14 @@ describe("プレビューページ", () => {
     expect((await get(`/api/news/${e.id}?preview=${token}`)).status).toBe(404);
   });
 
-  it("管理者のみ発行でき、存在しない記事は not_found", async () => {
+  it("only an admin can issue one, and a missing entry gives not_found", async () => {
     const e = await createEntry(admin(), "news", { data: { title: "a" } });
     await expect(createPreviewUrl(pub(), "news", e.id)).rejects.toMatchObject({ code: "unauthorized" });
     await expect(createPreviewUrl(createCtx(env, "https://cms.test", "read"), "news", e.id)).rejects.toMatchObject({ code: "forbidden" });
     await expect(createPreviewUrl(admin(), "news", "e_nope00000000")).rejects.toMatchObject({ code: "not_found" });
   });
 
-  it("slug で指定した記事でも発行でき、公開済みの記事も見られる", async () => {
+  it("can be issued for an entry given by slug, and published entries can be viewed", async () => {
     const e = await createEntry(admin(), "news", { data: { title: "公開" }, slug: "pub" });
     await publishEntry(admin(), "news", "pub");
     const { url } = await createPreviewUrl(admin(), "news", "pub");
@@ -118,12 +118,12 @@ describe("プレビューページ", () => {
   });
 });
 
-describe("?preview= と POST /api/:c/:id/preview", () => {
+describe("?preview= and POST /api/:c/:id/preview", () => {
   beforeEach(async () => {
     await env.DB.exec(await bootstrapSql(K, "test", "2026-11-26T00:00:00.000Z"));
   });
 
-  it("?preview= で下書きを JSON 取得できるが、別記事には使えない", async () => {
+  it("?preview= returns a draft as JSON, but cannot be used for another entry", async () => {
     const a = await createEntry(admin(), "news", { data: { title: "A" }, slug: "a" });
     const b = await createEntry(admin(), "news", { data: { title: "B" }, slug: "b" });
     const { token } = await createPreviewUrl(admin(), "news", a.id);
@@ -140,7 +140,7 @@ describe("?preview= と POST /api/:c/:id/preview", () => {
     expect(other.headers.get("Cache-Control")).toBe("no-store");
   });
 
-  it("不正なトークンは 401、公開済みの記事は他の記事のトークンでも通常どおり読める", async () => {
+  it("an invalid token gives 401, and a published entry can be read normally even with the token of another entry", async () => {
     const a = await createEntry(admin(), "news", { data: { title: "A" } });
     const b = await createEntry(admin(), "news", { data: { title: "B" }, status: "published" });
     const bad = await get(`/api/news/${a.id}?preview=garbage`);
@@ -153,7 +153,7 @@ describe("?preview= と POST /api/:c/:id/preview", () => {
     expect(res.headers.get("Cache-Control")).toBe("private, no-store");
   });
 
-  it("非公開コレクションの下書きも、トークンがあれば匿名で読める", async () => {
+  it("a draft in a private collection can be read anonymously with a token", async () => {
     await createCollection(admin(), { name: "secret", public: false, fields: [{ name: "title", type: "text" }] });
     const e = await createEntry(admin(), "secret", { data: { title: "S" } });
     const { token } = await createPreviewUrl(admin(), "secret", e.id);
@@ -162,7 +162,7 @@ describe("?preview= と POST /api/:c/:id/preview", () => {
     expect((await SELF.fetch((await createPreviewUrl(admin(), "secret", e.id)).url)).status).toBe(200);
   });
 
-  it("POST /api/:c/:id/preview は { url, token, expiresAt } を返す", async () => {
+  it("POST /api/:c/:id/preview returns { url, token, expiresAt }", async () => {
     const e = await createEntry(admin(), "news", { data: { title: "a" } });
     const post = (body?: string, key: string | null = K) =>
       SELF.fetch(`https://cms.test/api/news/${e.id}/preview`, {
@@ -190,7 +190,7 @@ describe("?preview= と POST /api/:c/:id/preview", () => {
     expect((await post(undefined, readKey)).status).toBe(403);
   });
 
-  it("存在しない記事のプレビュー発行は 404", async () => {
+  it("issuing a preview for a missing entry gives 404", async () => {
     const res = await SELF.fetch("https://cms.test/api/news/nope/preview", { method: "POST", headers: { Authorization: `Bearer ${K}` } });
     expect(res.status).toBe(404);
   });
@@ -215,7 +215,7 @@ describe("renderPreviewPage", () => {
     id: "e_1", slug: "s", status: "draft" as const, createdAt: "", updatedAt: "", publishedAt: null, data, html,
   });
 
-  it("文字列・ラベル・画像属性は必ずエスケープし、markdown の html だけを生で入れる", () => {
+  it("strings, labels and image attributes are always escaped, and only the markdown html is inserted raw", () => {
     const out = renderPreviewPage(
       collection,
       entry(
@@ -243,15 +243,15 @@ describe("renderPreviewPage", () => {
     expect(out).not.toMatch(/<script|<img src=x|<i>|<u>/);
   });
 
-  it("img は 1 つだけ（画像フィールド）で、未入力の項目も落ちずに描画する", () => {
+  it("only one img (the image field), and empty fields are rendered without failing", () => {
     const out = renderPreviewPage(collection, entry({ cover: null }));
     expect(out).not.toContain("<img");
     expect(out).toContain("empty");
   });
 });
 
-describe("実データの画像", () => {
-  it("画像フィールドは <img> で描画される", async () => {
+describe("real image data", () => {
+  it("the image field is rendered as <img>", async () => {
     await createCollection(admin(), { name: "shot", fields: [{ name: "cover", type: "image" }] });
     const m = await uploadMedia(admin(), { bytes: fixtures.png, filename: "a.png", alt: "猫<>" });
     const e = await createEntry(admin(), "shot", { data: { cover: m.id } });

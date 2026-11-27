@@ -11,7 +11,7 @@ function client(impl: (url: string, init: RequestInit) => Response | Promise<Res
 }
 
 describe("FemtoClient", () => {
-  it("API のエラーは ApiError になり issues を持つ", async () => {
+  it("an API error becomes an ApiError with issues", async () => {
     const c = new FemtoClient({ url: "https://cms.test", key: "k" }, async () =>
       Response.json(
         { error: { code: "validation_failed", message: "bad", issues: [{ path: "data.title", message: "required" }], hint: "fix it" } },
@@ -29,7 +29,7 @@ describe("FemtoClient", () => {
     });
   });
 
-  it("Bearer 認証を付け、URL の末尾スラッシュと path の先頭スラッシュを正規化する", async () => {
+  it("adds Bearer auth and normalizes the trailing slash of the URL and the leading slash of the path", async () => {
     const { c, fetchImpl } = client(() => Response.json({ ok: true }));
     const c2 = new FemtoClient({ url: "https://cms.test///", key: KEY }, fetchImpl as typeof fetch);
     await c2.request("GET", "api/keys");
@@ -40,13 +40,13 @@ describe("FemtoClient", () => {
     expect(new Headers(i1!.headers).get("authorization")).toBe(`Bearer ${KEY}`);
   });
 
-  it("query は undefined を除いて付ける", async () => {
+  it("adds query parameters, leaving out undefined ones", async () => {
     const { c, fetchImpl } = client(() => Response.json({}));
     await c.request("GET", "/api/news", { query: { limit: "5", status: undefined, q: "a b" } });
     expect(String(fetchImpl.mock.calls[0]![0])).toBe("https://cms.test/api/news?limit=5&q=a+b");
   });
 
-  it("json を指定すると JSON で送る", async () => {
+  it("sends JSON when json is given", async () => {
     const { c, fetchImpl } = client(() => Response.json({ id: "e_1" }, { status: 201 }));
     const out = await c.request<{ id: string }>("POST", "/api/news", { json: { data: { title: "x" } } });
     const init = fetchImpl.mock.calls[0]![1]!;
@@ -56,7 +56,7 @@ describe("FemtoClient", () => {
     expect(out).toEqual({ id: "e_1" });
   });
 
-  it("body と headers をそのまま渡せる（json なしなら Content-Type は付けない）", async () => {
+  it("passes body and headers through as they are (no Content-Type without json)", async () => {
     const { c, fetchImpl } = client(() => Response.json({}));
     const body = new Uint8Array([1, 2, 3]);
     await c.request("PUT", "/api/media/m_1", { body, headers: { "Content-Type": "image/png" } });
@@ -65,22 +65,22 @@ describe("FemtoClient", () => {
     expect(new Headers(init.headers).get("content-type")).toBe("image/png");
   });
 
-  it("204 は undefined", async () => {
+  it("204 returns undefined", async () => {
     const { c } = client(() => new Response(null, { status: 204 }));
     expect(await c.request("DELETE", "/api/news/e_1")).toBeUndefined();
   });
 
-  it("JSON 以外のエラー応答は http_<status> の ApiError", async () => {
+  it("a non-JSON error response becomes an ApiError with code http_<status>", async () => {
     const { c } = client(() => new Response("<html>Bad gateway</html>", { status: 502, headers: { "content-type": "text/html" } }));
     await expect(c.request("GET", "/api/news")).rejects.toMatchObject({ status: 502, code: "http_502" });
   });
 
-  it("error 形でない JSON のエラー応答も http_<status>", async () => {
+  it("a JSON error response without an error object also gets http_<status>", async () => {
     const { c } = client(() => Response.json({ nope: 1 }, { status: 500 }));
     await expect(c.request("GET", "/api/news")).rejects.toMatchObject({ status: 500, code: "http_500" });
   });
 
-  it("ネットワーク失敗は URL を含む分かるエラーで、キーは含まない", async () => {
+  it("a network failure gives a clear error that includes the URL but not the key", async () => {
     const c = new FemtoClient({ url: "https://cms.test/", key: KEY }, async () => {
       throw new TypeError("fetch failed");
     });
@@ -92,7 +92,7 @@ describe("FemtoClient", () => {
     expect(err.message).not.toContain("SECRET");
   });
 
-  it("成功応答が JSON でなければテキストを返す", async () => {
+  it("returns the text when a successful response is not JSON", async () => {
     const { c } = client(() => new Response("hello", { headers: { "content-type": "text/plain" } }));
     expect(await c.request("GET", "/x")).toBe("hello");
   });

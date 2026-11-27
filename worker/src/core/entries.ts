@@ -24,11 +24,11 @@ const toRecord = (r: EntryRow): EntryRecord => ({
 });
 
 const entryNotFound = (collection: string, idOrSlug: string) =>
-  new FemtoError("not_found", `エントリ "${idOrSlug}" がコレクション "${collection}" に見つかりません`, {
-    hint: "list_entries で一覧を確認してください",
+  new FemtoError("not_found", `Entry "${idOrSlug}" not found in collection "${collection}"`, {
+    hint: "Call list_entries to see the existing entries.",
   });
 
-const invalid = (issues: Issue[]) => new FemtoError("validation_failed", "入力が不正です", { issues });
+const invalid = (issues: Issue[]) => new FemtoError("validation_failed", "Invalid input", { issues });
 
 /** Admin-only writes: the role is checked before the collection is looked up. */
 async function writableCollection(ctx: Ctx, name: string): Promise<Collection> {
@@ -39,8 +39,8 @@ async function writableCollection(ctx: Ctx, name: string): Promise<Collection> {
 async function singleCollection(ctx: Ctx, name: string, verb: string): Promise<Collection> {
   const c = await getCollectionRow(ctx, name);
   if (c.kind !== "single") {
-    throw new FemtoError("bad_request", `コレクション "${name}" は single ではないため ${verb} は使えません`, {
-      hint: "list コレクションは GET /api/<name>/<idOrSlug> を使ってください",
+    throw new FemtoError("bad_request", `Collection "${name}" is not a single collection, so ${verb} cannot be used`, {
+      hint: "For a list collection, use GET /api/<name>/<idOrSlug>.",
     });
   }
   return c;
@@ -102,10 +102,10 @@ export interface ListResult { items: EntryRecord[]; total: number; limit: number
 export async function listEntryRecords(ctx: Ctx, collection: string, params: ListParams): Promise<ListResult> {
   const c = await getCollectionRow(ctx, collection);
   if (ctx.role === "public" && !c.public) {
-    throw new FemtoError("not_found", `コレクション "${collection}" が見つかりません`, { hint: "list_collections で一覧を確認してください" });
+    throw new FemtoError("not_found", `Collection "${collection}" not found`, { hint: "Call list_collections to see the existing collections." });
   }
   if (params.after !== undefined && params.before !== undefined) {
-    throw new FemtoError("bad_request", "after と before は同時に指定できません", { hint: "どちらか一方だけを指定してください" });
+    throw new FemtoError("bad_request", "after and before cannot be used together", { hint: "Pass only one of them." });
   }
   let cursorValues: unknown[] | undefined;
   const lookup = cursorLookup(c, params, ctx.role);
@@ -113,8 +113,8 @@ export async function listEntryRecords(ctx: Ctx, collection: string, params: Lis
     const key = (params.after ?? params.before)!;
     const row = await ctx.db.prepare(lookup.sql).bind(c.id, key, key).first<Record<string, unknown>>();
     if (!row) {
-      throw new FemtoError("bad_request", `${params.after !== undefined ? "after" : "before"} に指定したエントリ "${key}" が見つかりません`, {
-        hint: `"${collection}" にある${ctx.role === "admin" ? "" : "公開済みの"}エントリの id か slug を指定してください`,
+      throw new FemtoError("bad_request", `Entry "${key}" given as ${params.after !== undefined ? "after" : "before"} was not found`, {
+        hint: `Pass the id or slug of ${ctx.role === "admin" ? "an" : "a published"} entry in "${collection}".`,
       });
     }
     cursorValues = Array.from({ length: lookup.keys }, (_, i) => row[`k${i}`] ?? null);
@@ -202,14 +202,14 @@ function persistable(fields: FieldDef[], normalized: Record<string, unknown>, st
 async function conflictFrom(ctx: Ctx, e: unknown, c: Collection, slug: string | null, selfId: string): Promise<unknown> {
   const msg = e instanceof Error ? `${e.message} ${String((e as { cause?: unknown }).cause ?? "")}` : "";
   if (!/UNIQUE constraint failed/i.test(msg)) return e;
-  if (!/slug/i.test(msg)) return new FemtoError("conflict", "同じ id のエントリが既に存在します");
+  if (!/slug/i.test(msg)) return new FemtoError("conflict", "An entry with the same id already exists");
   const holder = await ctx.db
     .prepare("SELECT deleted_at FROM entries WHERE collection_id = ? AND slug = ? AND id != ?")
     .bind(c.id, slug, selfId).first<{ deleted_at: string | null }>();
-  return new FemtoError("conflict", `slug は既に使われています (コレクション "${c.name}")`, {
+  return new FemtoError("conflict", `slug "${slug}" is already in use in collection "${c.name}"`, {
     hint: holder?.deleted_at
-      ? "その slug はゴミ箱にあるエントリが使っています。restore_from_trash で戻すか、ゴミ箱を空にする（または完全削除する）か、別の slug を指定してください"
-      : "別の slug を指定してください",
+      ? "That slug is used by an entry in the trash. Call restore_from_trash to bring it back, empty the trash (or delete it permanently), or use a different slug."
+      : "Use a different slug.",
   });
 }
 
@@ -224,8 +224,8 @@ export async function createEntry(
   const c = await writableCollection(ctx, collection);
   const status: Status = input.status ?? "draft";
   if (c.kind === "single" && (await findRow(ctx, c, null))) {
-    throw new FemtoError("conflict", `single コレクション "${c.name}" には既にエントリがあります`, {
-      hint: "single コレクションは PUT /api/<name> を使う",
+    throw new FemtoError("conflict", `Single collection "${c.name}" already has an entry`, {
+      hint: "For a single collection, use PUT /api/<name>.",
     });
   }
   const slug = parseSlug(input.slug);

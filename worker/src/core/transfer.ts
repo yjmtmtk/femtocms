@@ -27,7 +27,7 @@ const CHUNK_BYTES = 500_000;
 const isObject = (v: unknown): v is Record<string, unknown> =>
   typeof v === "object" && v !== null && !Array.isArray(v);
 
-const invalid = (issues: Issue[], message = "入力が不正です") => new FemtoError("validation_failed", message, { issues });
+const invalid = (issues: Issue[], message = "Invalid input") => new FemtoError("validation_failed", message, { issues });
 
 /** `collections[0]` + `fields[1].options` -> `collections[0].fields[1].options`. */
 const join = (prefix: string, path: string) =>
@@ -211,10 +211,10 @@ async function planImport(ctx: Ctx, data: unknown, replace: boolean): Promise<Pl
     issues.push({ path, message, ...(expected !== undefined ? { expected } : {}), ...(received !== undefined ? { received } : {}) });
 
   if (!isObject(data)) throw invalid([{ path: "data", message: "object required", expected: "femtocms export object", received: data }]);
-  if (data.format !== FORMAT) push("format", `format は "${FORMAT}" である必要があります`, FORMAT, data.format);
-  if (data.version !== 1) push("version", "対応しているのは version 1 のみです", "1", data.version);
+  if (data.format !== FORMAT) push("format", `format must be "${FORMAT}"`, FORMAT, data.format);
+  if (data.version !== 1) push("version", "Only version 1 is supported", "1", data.version);
   for (const key of ["collections", "entries", "media"] as const) {
-    if (!Array.isArray(data[key])) push(key, `${key} は配列である必要があります`, "array", data[key]);
+    if (!Array.isArray(data[key])) push(key, `${key} must be an array`, "array", data[key]);
   }
   if (issues.length) throw invalid(issues);
   const rawCollections = data.collections as unknown[];
@@ -239,7 +239,7 @@ async function planImport(ctx: Ctx, data: unknown, replace: boolean): Promise<Pl
       return;
     }
     if (defs.has(def.name)) {
-      push(`collections[${i}].name`, `コレクション名 "${def.name}" が重複しています`);
+      push(`collections[${i}].name`, `Duplicate collection name "${def.name}"`);
       return;
     }
     const p = { index: i, def, id: dbByName.get(def.name)?.id ?? newId("c") };
@@ -249,7 +249,7 @@ async function planImport(ctx: Ctx, data: unknown, replace: boolean): Promise<Pl
   for (const { index, def } of planned) {
     for (const ref of referencedCollections(def.fields)) {
       if (!defs.has(ref.collection) && !live.has(ref.collection)) {
-        push(`collections[${index}].${ref.path}`, `参照先コレクション "${ref.collection}" が存在しません`);
+        push(`collections[${index}].${ref.path}`, `Referenced collection "${ref.collection}" does not exist`);
       }
     }
   }
@@ -267,20 +267,20 @@ async function planImport(ctx: Ctx, data: unknown, replace: boolean): Promise<Pl
     const p = `media[${i}]`;
     if (!isObject(raw)) return push(p, "object required", "object", raw);
     const before = issues.length;
-    if (typeof raw.id !== "string" || !MEDIA_ID_RE.test(raw.id)) push(`${p}.id`, "不正なメディア id です", "m_ + 12 chars of [0-9a-z]", raw.id);
-    else if (mediaIds.has(raw.id)) push(`${p}.id`, `メディア id "${raw.id}" が重複しています`);
+    if (typeof raw.id !== "string" || !MEDIA_ID_RE.test(raw.id)) push(`${p}.id`, "Invalid media id", "m_ + 12 chars of [0-9a-z]", raw.id);
+    else if (mediaIds.has(raw.id)) push(`${p}.id`, `Duplicate media id "${raw.id}"`);
     else mediaIds.add(raw.id);
-    if (typeof raw.filename !== "string" || raw.filename === "") push(`${p}.filename`, "filename が必要です", "string", raw.filename);
-    if (typeof raw.mimeType !== "string") push(`${p}.mimeType`, "mimeType が必要です", "string", raw.mimeType);
+    if (typeof raw.filename !== "string" || raw.filename === "") push(`${p}.filename`, "filename is required", "string", raw.filename);
+    if (typeof raw.mimeType !== "string") push(`${p}.mimeType`, "mimeType is required", "string", raw.mimeType);
     for (const k of ["width", "height"] as const) {
-      if (raw[k] !== null && raw[k] !== undefined && !isCount(raw[k])) push(`${p}.${k}`, `${k} は 0 以上の整数か null です`, "integer | null", raw[k]);
+      if (raw[k] !== null && raw[k] !== undefined && !isCount(raw[k])) push(`${p}.${k}`, `${k} must be an integer of 0 or more, or null`, "integer | null", raw[k]);
     }
-    if (typeof raw.alt !== "string") push(`${p}.alt`, "alt は文字列です", "string", raw.alt);
-    if (!isTimestamp(raw.createdAt)) push(`${p}.createdAt`, "ISO 8601 の日時が必要です", "ISO 8601 datetime string", raw.createdAt);
+    if (typeof raw.alt !== "string") push(`${p}.alt`, "alt must be a string", "string", raw.alt);
+    if (!isTimestamp(raw.createdAt)) push(`${p}.createdAt`, "A date-time in ISO 8601 format is required", "ISO 8601 datetime string", raw.createdAt);
     let url: string | undefined;
     if (raw.url !== undefined) {
       if (typeof raw.url !== "string" || !/^https?:\/\//i.test(raw.url)) {
-        push(`${p}.url`, "url は http:// または https:// の URL です", "http(s) URL", raw.url);
+        push(`${p}.url`, "url must be an http:// or https:// URL", "http(s) URL", raw.url);
       } else {
         url = raw.url;
       }
@@ -309,25 +309,25 @@ async function planImport(ctx: Ctx, data: unknown, replace: boolean): Promise<Pl
     if (!isObject(raw)) return push(p, "object required", "object", raw);
     const before = issues.length;
     const id = raw.id;
-    if (typeof id !== "string" || !ENTRY_ID_RE.test(id)) push(`${p}.id`, "不正なエントリ id です", "e_ + 12 chars of [0-9a-z]", id);
-    else if (entryIds.has(id)) push(`${p}.id`, `エントリ id "${id}" が重複しています`);
+    if (typeof id !== "string" || !ENTRY_ID_RE.test(id)) push(`${p}.id`, "Invalid entry id", "e_ + 12 chars of [0-9a-z]", id);
+    else if (entryIds.has(id)) push(`${p}.id`, `Duplicate entry id "${id}"`);
     const c = typeof raw.collection === "string" ? collectionOf(raw.collection) : undefined;
-    if (!c) push(`${p}.collection`, `コレクション "${String(raw.collection)}" が取り込みにも既存にもありません`, "collection name", raw.collection);
+    if (!c) push(`${p}.collection`, `Collection "${String(raw.collection)}" is in neither the import nor the existing data`, "collection name", raw.collection);
     const slug = raw.slug ?? null;
     if (slug !== null && (typeof slug !== "string" || !SLUG_RE.test(slug))) {
-      push(`${p}.slug`, "不正な slug です", SLUG_RE.source, slug);
+      push(`${p}.slug`, "Invalid slug", SLUG_RE.source, slug);
     } else if (slug !== null && c) {
       const key = `${c.id}/${slug}`;
-      if (slugs.has(key)) push(`${p}.slug`, `slug "${slug}" が取り込み内で重複しています`);
+      if (slugs.has(key)) push(`${p}.slug`, `Duplicate slug "${slug}" in the import`);
       slugs.add(key);
     }
     const status = raw.status;
-    if (status !== "draft" && status !== "published") push(`${p}.status`, 'status は "draft" か "published" です', "draft | published", status);
+    if (status !== "draft" && status !== "published") push(`${p}.status`, 'status must be "draft" or "published"', "draft | published", status);
     for (const k of ["createdAt", "updatedAt"] as const) {
-      if (!isTimestamp(raw[k])) push(`${p}.${k}`, "ISO 8601 の日時が必要です", "ISO 8601 datetime string", raw[k]);
+      if (!isTimestamp(raw[k])) push(`${p}.${k}`, "A date-time in ISO 8601 format is required", "ISO 8601 datetime string", raw[k]);
     }
     if (raw.publishedAt !== null && raw.publishedAt !== undefined && !isTimestamp(raw.publishedAt)) {
-      push(`${p}.publishedAt`, "ISO 8601 の日時か null です", "ISO 8601 datetime string | null", raw.publishedAt);
+      push(`${p}.publishedAt`, "A date-time in ISO 8601 format, or null, is required", "ISO 8601 datetime string | null", raw.publishedAt);
     }
     let normalized: Record<string, unknown> = {};
     if (c && (status === "draft" || status === "published")) {
@@ -385,7 +385,7 @@ async function planImport(ctx: Ctx, data: unknown, replace: boolean): Promise<Pl
   for (const e of entries) {
     const holder = slugRows.find((r) => r.slug === e.slug && r.cname === e.collection && r.id !== e.id);
     if (holder) {
-      push(`entries[${e.index}].slug`, `slug "${e.slug}" は既存のエントリ ${holder.id} が使っています${holder.deleted_at ? "（ゴミ箱内）" : ""}`,
+      push(`entries[${e.index}].slug`, `slug "${e.slug}" is already used by existing entry ${holder.id}${holder.deleted_at ? " (in the trash)" : ""}`,
         "unused slug", e.slug);
     }
   }
@@ -402,7 +402,7 @@ async function planImport(ctx: Ctx, data: unknown, replace: boolean): Promise<Pl
     const ids = new Set([...existingInSingles.filter((r) => r.collection_id === s.id).map((r) => r.id), ...imported.map((e) => e.id)]);
     if (ids.size > 1) {
       push(imported.length ? `entries[${imported[imported.length - 1].index}]` : s.at,
-        `single コレクション "${s.name}" には有効なエントリを 1 件までしか置けません`);
+        `Single collection "${s.name}" can hold at most 1 active entry`);
     }
   }
 
@@ -421,11 +421,11 @@ async function planImport(ctx: Ctx, data: unknown, replace: boolean): Promise<Pl
       m.inR2 = true; // url-less, or our own file: no need to download it
       m.record.size = size;
     } else if (!m.url) {
-      push(`media[${m.index}].url`, `url が無く、R2 にも ${r2Key(m.record.id)} がありません`, `url, or a file already uploaded as ${r2Key(m.record.id)}`);
+      push(`media[${m.index}].url`, `url is missing, and ${r2Key(m.record.id)} is not in R2 either`, `url, or a file already uploaded as ${r2Key(m.record.id)}`);
     }
   }
 
-  if (issues.length) throw invalid(issues, "取り込むデータが不正です。何も書き込んでいません");
+  if (issues.length) throw invalid(issues, "Invalid import data. Nothing was written");
   return {
     collections: planned, existingCollectionIds: planned.filter((p) => dbByName.has(p.def.name)).map((p) => p.id),
     entries, media,
@@ -455,7 +455,7 @@ async function storeMedia(ctx: Ctx, media: PlannedMedia[]): Promise<PlannedMedia
         issues.push({ path: `media[${m.index}].url`, message: e.message, ...(e.hint ? { expected: e.hint } : {}) });
       }
     }
-    if (issues.length) throw invalid(issues, "メディアを取得できませんでした。D1 には何も書き込んでいません");
+    if (issues.length) throw invalid(issues, "Could not fetch the media. Nothing was written to D1");
   } catch (e) {
     await removeNewObjects(ctx, written);
     throw e;
@@ -497,7 +497,7 @@ export async function importData(
 ): Promise<{ collections: number; entries: number; media: number }> {
   requireRole(ctx, "admin");
   if (input.mode !== "merge" && input.mode !== "replace") {
-    throw invalid([{ path: "mode", message: 'mode は "merge" か "replace" です', expected: "merge | replace", received: input.mode }]);
+    throw invalid([{ path: "mode", message: 'mode must be "merge" or "replace"', expected: "merge | replace", received: input.mode }]);
   }
   const replace = input.mode === "replace";
   if (replace) requireConfirm(ctx, input.confirm);

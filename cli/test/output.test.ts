@@ -23,15 +23,15 @@ afterEach(() => {
 });
 
 describe("print", () => {
-  it("json=true なら整形 JSON", () => {
+  it("json=true prints formatted JSON", () => {
     print({ a: 1 }, { json: true, human: () => "H" });
     expect(out.join("")).toBe(JSON.stringify({ a: 1 }, null, 2) + "\n");
   });
-  it("human があればそれを使う", () => {
+  it("uses human when it is given", () => {
     print({ a: 1 }, { json: false, human: () => "H" });
     expect(out.join("")).toBe("H\n");
   });
-  it("human が無ければ JSON", () => {
+  it("falls back to JSON when human is missing", () => {
     print({ a: 1 }, { json: false });
     expect(out.join("")).toBe(JSON.stringify({ a: 1 }, null, 2) + "\n");
   });
@@ -46,7 +46,7 @@ describe("printError", () => {
     hint: "fix it",
   });
 
-  it("ApiError は人間向けに issues と hint を出し、終了コード 1", () => {
+  it("prints issues and hint of an ApiError for humans and exits with code 1", () => {
     expect(() => printError(apiErr, { json: false })).toThrow("exit");
     expect(exits).toEqual([1]);
     const text = err.join("");
@@ -58,7 +58,7 @@ describe("printError", () => {
     expect(out).toEqual([]);
   });
 
-  it("json=true は標準エラーに {error:{...}}", () => {
+  it("json=true writes {error:{...}} to stderr", () => {
     expect(() => printError(apiErr, { json: true })).toThrow("exit");
     const parsed = JSON.parse(err.join(""));
     expect(parsed).toEqual({
@@ -71,13 +71,13 @@ describe("printError", () => {
     });
   });
 
-  it("ApiError 以外は終了コード 2", () => {
+  it("errors other than ApiError exit with code 2", () => {
     expect(() => printError(new Error("boom"), { json: false })).toThrow("exit");
     expect(exits).toEqual([2]);
     expect(err.join("")).toContain("boom");
   });
 
-  it("Error でない値も扱える", () => {
+  it("handles values that are not Error objects", () => {
     expect(() => printError("oops", { json: true })).toThrow("exit");
     expect(JSON.parse(err.join("")).error.message).toBe("oops");
   });

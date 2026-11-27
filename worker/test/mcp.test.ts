@@ -55,26 +55,26 @@ afterEach(async () => {
   vi.restoreAllMocks();
 });
 
-describe("認証", () => {
-  it("キー無しは 401（WWW-Authenticate: Bearer）", async () => {
+describe("authentication", () => {
+  it("no key gives 401 (WWW-Authenticate: Bearer)", async () => {
     const res = await SELF.fetch("https://cms.test/mcp", { method: "POST", body: "{}" });
     expect(res.status).toBe(401);
     expect(res.headers.get("WWW-Authenticate")).toBe("Bearer");
     expect((await res.json() as Out).error.code).toBe("unauthorized");
   });
-  it("無効なキーも 401", async () => {
+  it("an invalid key also gives 401", async () => {
     const res = await post("fcms_admin_" + "z".repeat(32));
     expect(res.status).toBe(401);
     expect(res.headers.get("WWW-Authenticate")).toBe("Bearer");
   });
-  it("read キーは 403（ツールは何も見せない）", async () => {
+  it("a read key gives 403 (no tools are shown)", async () => {
     const { key } = await createKey(createCtx(env, "https://cms.test", "admin"), { name: "reader", role: "read" });
     const res = await post(key, { jsonrpc: "2.0", id: 1, method: "tools/list" });
     expect(res.status).toBe(403);
     expect(res.headers.get("WWW-Authenticate")).toBeNull();
     expect((await res.json() as Out).error.code).toBe("forbidden");
   });
-  it("GET / DELETE は 405（ステートレスなので SSE もセッション終了も無い）", async () => {
+  it("GET / DELETE give 405 (stateless, so there is no SSE and no session end)", async () => {
     for (const method of ["GET", "DELETE"]) {
       const res = await SELF.fetch("https://cms.test/mcp", {
         method, headers: { Authorization: `Bearer ${K}`, Accept: "text/event-stream" },
@@ -87,8 +87,8 @@ describe("認証", () => {
   });
 });
 
-describe("ツール一覧", () => {
-  it("全ツールがあり、破壊的なものに destructiveHint、サイト名が説明文に入る", async () => {
+describe("tool list", () => {
+  it("all tools exist, destructive ones have destructiveHint, and the site name is in the description", async () => {
     const client = await connect(K);
     const { tools } = await client.listTools();
     const names = tools.map((t) => t.name);
@@ -122,7 +122,7 @@ describe("ツール一覧", () => {
     expect(tool("list_entries").description).toContain('"all" or "draft"');
   });
 
-  it("全パラメータに説明があり、サーバに instructions がある", async () => {
+  it("every parameter has a description, and the server has instructions", async () => {
     const client = await connect(K);
     const { tools } = await client.listTools();
     for (const t of tools) {
@@ -148,8 +148,8 @@ describe("ツール一覧", () => {
   });
 });
 
-describe("流れ", () => {
-  it("AI の典型的な流れ: コレクション作成 → 記事作成 → プレビュー → 公開 → 一覧", async () => {
+describe("flow", () => {
+  it("typical AI flow: create collection → create entry → preview → publish → list", async () => {
     const client = await connect(K);
     expect((await call(client, "create_collection", news)).structuredContent).toMatchObject({ name: "news" });
     const created = await call(client, "create_entry", { collection: "news", data: { title: "冬" } });
@@ -175,7 +175,7 @@ describe("流れ", () => {
     expect((await call(client, "unpublish_entry", { collection: "news", id })).structuredContent.status).toBe("draft");
   });
 
-  it("検証エラーは isError で issues が読める", async () => {
+  it("a validation error is isError and issues can be read", async () => {
     const client = await connect(K);
     await call(client, "create_collection", news);
     const r = await call(client, "create_entry", { collection: "news", data: { titel: "x" } });
@@ -184,7 +184,7 @@ describe("流れ", () => {
     expect(errorOf(r)).toMatchObject({ code: "validation_failed", issues: [expect.objectContaining({ path: "data.titel" })] });
   });
 
-  it("not_found と confirmation_required は hint 付きの isError", async () => {
+  it("not_found and confirmation_required are isError with a hint", async () => {
     const client = await connect(K);
     expect(errorOf(await call(client, "get_collection", { name: "nope" }))).toMatchObject({ code: "not_found" });
     const r = await call(client, "empty_trash", { confirm: "wrong" });
@@ -192,7 +192,7 @@ describe("流れ", () => {
     expect(errorOf(r)).toMatchObject({ code: "confirmation_required", hint: expect.stringContaining(SITE) });
   });
 
-  it("想定外の例外は code internal で中身を漏らさない", async () => {
+  it("an unexpected exception has code internal and does not leak details", async () => {
     const spy = vi.spyOn(console, "error").mockImplementation(() => {});
     vi.spyOn(collectionsModule, "listCollections").mockRejectedValue(new Error("secret db password"));
     const client = await connect(K);
@@ -203,13 +203,13 @@ describe("流れ", () => {
     expect(spy).toHaveBeenCalled();
   });
 
-  it("スキーマに合わない入力は isError（ツールは実行されない）", async () => {
+  it("input that does not match the schema is isError (the tool is not run)", async () => {
     const client = await connect(K);
     const r = await call(client, "list_entries", { collection: "news", status: "bogus" });
     expect(r.isError).toBe(true);
   });
 
-  it("single コレクション: create_entry は putSingle、get_entry は id 無しで取れる", async () => {
+  it("single collection: create_entry acts as putSingle, and get_entry works without an id", async () => {
     const client = await connect(K);
     await call(client, "create_collection", site);
     const first = await call(client, "create_entry", { collection: "site", data: { title: "a" } });
@@ -222,7 +222,7 @@ describe("流れ", () => {
     expect((await call(client, "list_entries", { collection: "site" })).structuredContent.id).toBe(first.structuredContent.id);
   });
 
-  it("create_entry は publishedAt を受け取る（HTTP POST と同じ）", async () => {
+  it("create_entry accepts publishedAt (same as HTTP POST)", async () => {
     const client = await connect(K);
     await call(client, "create_collection", news);
     const r = await call(client, "create_entry", { collection: "news", data: { title: "t" }, status: "published", publishedAt: "2026-01-02T03:04:05Z" });
@@ -231,13 +231,13 @@ describe("流れ", () => {
     expect(errorOf(bad).issues[0].path).toBe("publishedAt");
   });
 
-  it("list コレクションで get_entry に id が無いと bad_request", async () => {
+  it("get_entry without an id on a list collection gives bad_request", async () => {
     const client = await connect(K);
     await call(client, "create_collection", news);
     expect(errorOf(await call(client, "get_entry", { collection: "news" }))).toMatchObject({ code: "bad_request" });
   });
 
-  it("update_entry は data をマージし、delete_entry はゴミ箱へ送り restore_from_trash で戻せる", async () => {
+  it("update_entry merges data, and delete_entry sends the entry to the trash, from where restore_from_trash brings it back", async () => {
     const client = await connect(K);
     await call(client, "create_collection", news);
     const { id } = (await call(client, "create_entry", { collection: "news", data: { title: "a", body: "x" } })).structuredContent;
@@ -251,7 +251,7 @@ describe("流れ", () => {
     expect((await call(client, "get_entry", { collection: "news", id })).structuredContent.slug).toBe("bee");
   });
 
-  it("ゴミ箱の完全削除・空にする・reset は confirm が要る", async () => {
+  it("permanent delete from the trash, emptying the trash and reset need confirm", async () => {
     const client = await connect(K);
     await call(client, "create_collection", news);
     const { id } = (await call(client, "create_entry", { collection: "news", data: { title: "a" } })).structuredContent;
@@ -274,7 +274,7 @@ describe("流れ", () => {
     expect((await call(client, "list_collections")).structuredContent.items).toEqual([]);
   });
 
-  it("キー: 作成（平文は一度だけ）・一覧・失効。最後の管理キーは失効できない", async () => {
+  it("keys: create (the plain key is shown only once), list and revoke; the last admin key cannot be revoked", async () => {
     const client = await connect(K);
     const created = (await call(client, "create_key", { name: "web", role: "read" })).structuredContent;
     expect(created.key).toMatch(/^fcms_read_/);
@@ -286,7 +286,7 @@ describe("流れ", () => {
     expect((await call(client, "revoke_key", { id: admin.id })).isError).toBe(true);
   });
 
-  it("export_data と import_data（merge / replace は confirm 必須）", async () => {
+  it("export_data and import_data (merge / replace need confirm)", async () => {
     const client = await connect(K);
     await call(client, "create_collection", news);
     await call(client, "create_entry", { collection: "news", data: { title: "冬" }, slug: "winter", status: "published" });
@@ -301,8 +301,8 @@ describe("流れ", () => {
   });
 });
 
-describe("メディア", () => {
-  it("base64 でアップロードし、一覧・削除できる", async () => {
+describe("media", () => {
+  it("can be uploaded as base64, listed and deleted", async () => {
     const client = await connect(K);
     const base64 = btoa(String.fromCharCode(...fixtures.png));
     const m = (await call(client, "upload_media", { base64, filename: "p.png", alt: "x" })).structuredContent;
@@ -312,7 +312,7 @@ describe("メディア", () => {
     expect((await call(client, "list_media")).structuredContent.total).toBe(0);
   });
 
-  it("update_media で alt を変えられる（HTTP の PATCH /api/media/:id と同じ）", async () => {
+  it("update_media can change alt (same as HTTP PATCH /api/media/:id)", async () => {
     const client = await connect(K);
     const m = (await call(client, "upload_media", { base64: btoa(String.fromCharCode(...fixtures.png)), filename: "p.png" })).structuredContent;
     const r = await call(client, "update_media", { id: m.id, alt: "新しい説明" });
@@ -321,7 +321,7 @@ describe("メディア", () => {
     expect(errorOf(await call(client, "update_media", { id: "m_000000000000", alt: "x" })).code).toBe("not_found");
   });
 
-  it("ペアになっていないサロゲートのファイル名でも upload_media と list_media がエラーにならない", async () => {
+  it("upload_media and list_media do not fail even with a filename containing an unpaired surrogate", async () => {
     const client = await connect(K);
     const r = await call(client, "upload_media", { base64: btoa(String.fromCharCode(...fixtures.png)), filename: "\ud800.png" });
     expect(r.isError).toBeUndefined();
@@ -331,7 +331,7 @@ describe("メディア", () => {
     expect(list.structuredContent.items[0].filename).toBe("\ufffd.png");
   });
 
-  it("url から取り込める（外部 fetch はモック）", async () => {
+  it("can be imported from a url (the external fetch is mocked)", async () => {
     const real = globalThis.fetch;
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) =>
       String(input).startsWith("https://img.test/")
@@ -342,7 +342,7 @@ describe("メディア", () => {
     expect(r.structuredContent).toMatchObject({ filename: "pic.png", mimeType: "image/png" });
   });
 
-  it("url と base64 の両方・どちらも無し・base64 だけで filename 無しは bad_request", async () => {
+  it("both url and base64, neither, or base64 without filename give bad_request", async () => {
     const client = await connect(K);
     for (const args of [{}, { url: "https://img.test/a.png", base64: "AA==", filename: "a.png" }, { base64: "AA==" }]) {
       const r = await call(client, "upload_media", args);
@@ -351,7 +351,7 @@ describe("メディア", () => {
     }
   });
 
-  it("画像フィールドに media id を入れて読める", async () => {
+  it("a media id can be put into an image field and read back", async () => {
     const client = await connect(K);
     await call(client, "create_collection", { name: "pages", fields: [{ name: "hero", type: "image" }] });
     const m = (await call(client, "upload_media", { base64: btoa(String.fromCharCode(...fixtures.png)), filename: "h.png" })).structuredContent;
@@ -360,8 +360,8 @@ describe("メディア", () => {
   });
 });
 
-describe("プレビュー URL", () => {
-  it("ttlSeconds は 1..2592000 の整数だけ（HTTP と同じ検証）", async () => {
+describe("preview URL", () => {
+  it("ttlSeconds must be an integer from 1 to 2592000 (same validation as HTTP)", async () => {
     const client = await connect(K);
     await call(client, "create_collection", news);
     const { id } = (await call(client, "create_entry", { collection: "news", data: { title: "a" } })).structuredContent;
@@ -377,11 +377,11 @@ describe("プレビュー URL", () => {
   });
 });
 
-describe("HTTP との一致", () => {
+describe("parity with HTTP", () => {
   const http = (path: string) =>
     SELF.fetch(`https://cms.test${path}`, { headers: { Authorization: `Bearer ${K}` } }).then((r) => r.json() as Promise<Out>);
 
-  it("同じ記事を API と get_entry で取得すると完全に一致する（data・html を含む）", async () => {
+  it("the same entry fetched through the API and get_entry matches exactly (including data and html)", async () => {
     const client = await connect(K);
     await call(client, "create_collection", {
       name: "posts",
@@ -398,7 +398,7 @@ describe("HTTP との一致", () => {
     expect((await call(client, "get_entry", { collection: "posts", id: "hello" })).structuredContent).toEqual(viaHttp);
   });
 
-  it("list_entries は HTTP の一覧と一致する（sort / filter / fields / limit / offset / status）", async () => {
+  it("list_entries matches the HTTP list (sort / filter / fields / limit / offset / status)", async () => {
     const client = await connect(K);
     await call(client, "create_collection", {
       name: "items", fields: [{ name: "title", type: "text" }, { name: "n", type: "number" }],

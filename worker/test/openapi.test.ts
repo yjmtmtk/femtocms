@@ -35,7 +35,7 @@ const build = (cols = all): Doc => buildOpenApi(cols, "https://cms.test", "my-si
 
 describe("fieldToJsonSchema", () => {
   const f = (name: string) => fields.find((x) => x.name === name)!;
-  it("write: 型ごとのスキーマ", () => {
+  it("write: schema per field type", () => {
     expect(fieldToJsonSchema(f("title"), "write")).toEqual({ type: "string", maxLength: 100, description: "Headline" });
     expect(fieldToJsonSchema(f("category"), "write")).toEqual({ type: "string", enum: ["info", "event"] });
     expect(fieldToJsonSchema(f("tags"), "write")).toEqual({ type: "array", items: { type: "string", enum: ["a", "b"] } });
@@ -53,7 +53,7 @@ describe("fieldToJsonSchema", () => {
     expect(list.items.properties.heading).toEqual({ type: "string" });
     expect(list.items.properties.pic.pattern).toBe("^m_[0-9a-z]{12}$");
   });
-  it("read: 画像は ApiMedia、参照は id 文字列（参照先が無ければ null、multiple では除かれる）、markdown は文字列", () => {
+  it("read: image is ApiMedia, reference is an id string (null if the target is missing, dropped when multiple), markdown is a string", () => {
     expect(fieldToJsonSchema(f("cover"), "read")).toEqual({ anyOf: [{ $ref: "#/components/schemas/ApiMedia" }, { type: "null" }] });
     expect(fieldToJsonSchema(f("gallery"), "read")).toEqual({ type: "array", items: { $ref: "#/components/schemas/ApiMedia" } });
     expect(fieldToJsonSchema(f("author"), "read")).toMatchObject({ type: ["string", "null"], pattern: "^e_[0-9a-z]{12}$" });
@@ -61,7 +61,7 @@ describe("fieldToJsonSchema", () => {
     expect(fieldToJsonSchema(f("related"), "read")).toMatchObject({ type: "array", items: { type: "string", pattern: "^e_[0-9a-z]{12}$" } });
     expect(fieldToJsonSchema(f("body"), "read")).toMatchObject({ type: "string" });
   });
-  it("default は write にだけ出る", () => {
+  it("default appears only in write", () => {
     const d: FieldDef = { name: "n", type: "number", default: 3 };
     expect(fieldToJsonSchema(d, "write")).toMatchObject({ default: 3 });
     expect(fieldToJsonSchema(d, "read")).not.toHaveProperty("default");
@@ -69,7 +69,7 @@ describe("fieldToJsonSchema", () => {
 });
 
 describe("buildOpenApi", () => {
-  it("コレクションのフィールドが create の requestBody に出る", () => {
+  it("collection fields appear in the create requestBody", () => {
     const doc = build([newsCollection]);
     expect(doc.openapi).toBe("3.1.0");
     const body = doc.paths["/api/news"].post.requestBody.content["application/json"].schema;
@@ -79,7 +79,7 @@ describe("buildOpenApi", () => {
     expect(data.additionalProperties).toBe(false);
   });
 
-  it("required は required に載せず、説明で公開時のみと断る", () => {
+  it("required is not listed in required; the description says it applies only on publish", () => {
     const write = build().components.schemas.NewsDataWrite;
     expect(write.required).toBeUndefined();
     expect(write.description).toMatch(/title/);
@@ -97,7 +97,7 @@ describe("buildOpenApi", () => {
     expect(doc.components.securitySchemes.bearer).toMatchObject({ type: "http", scheme: "bearer" });
   });
 
-  it("list コレクションは list/get/create/update/delete/publish/unpublish、single は get/put", () => {
+  it("list collections get list/get/create/update/delete/publish/unpublish; single collections get get/put", () => {
     const doc = build();
     expect(Object.keys(doc.paths["/api/news"])).toEqual(["get", "post"]);
     expect(Object.keys(doc.paths["/api/news/{id}"])).toEqual(["get", "patch", "delete"]);
@@ -108,7 +108,7 @@ describe("buildOpenApi", () => {
     expect(doc.paths["/api/site/{id}/publish"].post).toBeDefined();
   });
 
-  it("共通パスを載せる", () => {
+  it("common paths are included", () => {
     const doc = build([]);
     for (const p of ["/api/collections", "/api/collections/{name}", "/api/media", "/api/media/{id}", "/api/trash", "/api/trash/{id}",
       "/api/trash/{id}/restore", "/api/keys", "/api/keys/{id}", "/api/export", "/api/import", "/api/reset"]) {
@@ -116,7 +116,7 @@ describe("buildOpenApi", () => {
     }
   });
 
-  it("一覧のクエリパラメータ", () => {
+  it("query parameters of the list endpoint", () => {
     const names = build().paths["/api/news"].get.parameters.map((p: Doc) => p.name);
     expect(names).toEqual(["limit", "offset", "sort", "filter[field]", "filter[field][op]", "fields", "expand", "status", "after", "before"]);
     const status = build().paths["/api/news"].get.parameters.find((p: Doc) => p.name === "status");
@@ -124,14 +124,14 @@ describe("buildOpenApi", () => {
     expect(status.description).toMatch(/Admin only/);
   });
 
-  it("read スキーマ: html は markdown フィールドだけ、image は ApiMedia", () => {
+  it("read schema: html only for markdown fields, image is ApiMedia", () => {
     const s = build().components.schemas;
     expect(Object.keys(s.NewsEntry.properties.html.properties)).toEqual(["body"]);
     expect(s.NewsData.properties.cover.anyOf[0]).toEqual({ $ref: "#/components/schemas/ApiMedia" });
     expect(s.NewsData.properties.author.type).toEqual(["string", "null"]);
   });
 
-  it("ハイフン入りの名前は有効なコンポーネント名になる", () => {
+  it("a name with hyphens becomes a valid component name", () => {
     const s = build().components.schemas;
     expect(s.BlogPostEntry).toBeDefined();
     expect(s.BlogPostData).toBeDefined();
@@ -139,7 +139,7 @@ describe("buildOpenApi", () => {
     for (const name of Object.keys(s)) expect(name).toMatch(/^[A-Za-z0-9._-]+$/);
   });
 
-  it("名前が衝突しても別のコンポーネントになる", () => {
+  it("colliding names still become separate components", () => {
     const a = collection("a--b", "list", true, []);
     const b = collection("a-b", "list", true, []);
     const s = build([a, b]).components.schemas;
@@ -147,7 +147,7 @@ describe("buildOpenApi", () => {
     expect(entryNames).toHaveLength(2);
   });
 
-  it("構造: すべての $ref が解決し、全オペレーションに responses があり、パスパラメータが宣言済み", () => {
+  it("structure: every $ref resolves, every operation has responses, and path parameters are declared", () => {
     const doc = build();
     const refs: string[] = [];
     JSON.stringify(doc, (_k, v) => { if (v && typeof v === "object" && typeof v.$ref === "string") refs.push(v.$ref); return v; });
@@ -184,7 +184,7 @@ describe("GET /api/openapi.json", () => {
     expect((await post("/api/collections", { name: "secret", public: false, fields: [{ name: "note", type: "text" }] })).status).toBe(201);
   });
 
-  it("public には非公開コレクションが載らず、公開キャッシュヘッダが付く", async () => {
+  it("public does not list private collections and gets public cache headers", async () => {
     const res = await get();
     expect(res.status).toBe(200);
     expect(res.headers.get("cache-control")).toBe("public, max-age=60");
@@ -197,7 +197,7 @@ describe("GET /api/openapi.json", () => {
     expect(doc.components.schemas.SecretEntry).toBeUndefined();
   });
 
-  it("admin / read キーは全コレクションが載り、no-store", async () => {
+  it("admin / read keys list all collections and get no-store", async () => {
     const created: Doc = await (await post("/api/keys", { name: "r", role: "read" })).json();
     for (const key of [K, created.key as string]) {
       const res = await get(key);
@@ -209,7 +209,7 @@ describe("GET /api/openapi.json", () => {
     }
   });
 
-  it("/api/openapi.json は /api/:c より先に解決される (コレクションとして扱われない)", async () => {
+  it("/api/openapi.json is resolved before /api/:c (not treated as a collection)", async () => {
     const res = await get(K);
     expect((await res.json() as Doc).openapi).toBe("3.1.0");
   });

@@ -20,7 +20,7 @@ function wranglerBin(): string {
   const pkgPath = createRequire(import.meta.url).resolve("wrangler/package.json");
   const pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as { bin?: string | Record<string, string> };
   const bin = typeof pkg.bin === "string" ? pkg.bin : pkg.bin?.wrangler;
-  if (!bin) throw new Error("同梱の wrangler の bin が見つかりません");
+  if (!bin) throw new Error("Could not find the bundled wrangler binary");
   return join(dirname(pkgPath), bin);
 }
 

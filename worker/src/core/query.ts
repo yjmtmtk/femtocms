@@ -28,8 +28,8 @@ type Operator = (typeof OPERATORS)[number];
 const csv = (v: string): string[] => v.split(",").map(s => s.trim()).filter(Boolean);
 
 function badInt(name: string, v: string): FemtoError {
-  return new FemtoError("bad_request", `${name} は整数で指定してください (受け取った値: "${v}")`, {
-    hint: `${name}=10 のように指定します`,
+  return new FemtoError("bad_request", `${name} must be an integer (received "${v}")`, {
+    hint: `Use a form like ${name}=10.`,
   });
 }
 
@@ -53,8 +53,8 @@ export function parseListParams(query: URLSearchParams): ListParams {
       case "before": params[key] = value; break;
       case "status":
         if (value !== "draft" && value !== "published" && value !== "all") {
-          throw new FemtoError("bad_request", `status が不正です (受け取った値: "${value}")`, {
-            hint: "status は draft / published / all のいずれかです",
+          throw new FemtoError("bad_request", `Invalid status (received "${value}")`, {
+            hint: "status must be one of draft, published, all.",
           });
         }
         params.status = value;
@@ -63,8 +63,8 @@ export function parseListParams(query: URLSearchParams): ListParams {
         if (!key.startsWith("filter")) break; // unrelated query params are ignored
         const m = /^filter\[([^\]]+)\](?:\[([^\]]+)\])?$/.exec(key);
         if (!m) {
-          throw new FemtoError("bad_request", `filter の書式が不正です: "${key}"`, {
-            hint: "filter[フィールド名]=値 または filter[フィールド名][演算子]=値 の形で指定します",
+          throw new FemtoError("bad_request", `Invalid filter format: "${key}"`, {
+            hint: "Use filter[field]=value or filter[field][operator]=value.",
           });
         }
         const [, name, op] = m;
@@ -133,11 +133,11 @@ function resolveColumns(collection: Collection): Map<string, Column> {
   return cols;
 }
 
-const usable = (cols: Map<string, Column>) => `使えるフィールド: ${[...cols.keys()].join(", ")}`;
+const usable = (cols: Map<string, Column>) => `Available fields: ${[...cols.keys()].join(", ")}.`;
 
 function unknownField(name: string, cols: Map<string, Column>, what: "filter" | "sort"): FemtoError {
-  return new FemtoError("bad_request", `${what} に使えないフィールドです: "${name}"`, {
-    hint: `${usable(cols)} (list / json 型のフィールドは使えません)`,
+  return new FemtoError("bad_request", `Field cannot be used in ${what}: "${name}"`, {
+    hint: `${usable(cols)} Fields of type list or json cannot be used.`,
   });
 }
 
@@ -154,18 +154,18 @@ function convert(kind: Kind, raw: string, name: string): unknown {
     case "number": {
       const n = Number(raw);
       if (raw.trim() === "" || !Number.isFinite(n)) {
-        throw new FemtoError("bad_request", `"${name}" には数値を指定してください (受け取った値: "${raw}")`, { hint: `filter[${name}]=1000` });
+        throw new FemtoError("bad_request", `"${name}" must be a number (received "${raw}")`, { hint: `filter[${name}]=1000` });
       }
       return n;
     }
     case "boolean":
       if (raw === "true") return 1;
       if (raw === "false") return 0;
-      throw new FemtoError("bad_request", `"${name}" には true か false を指定してください (受け取った値: "${raw}")`, { hint: `filter[${name}]=true` });
+      throw new FemtoError("bad_request", `"${name}" must be true or false (received "${raw}")`, { hint: `filter[${name}]=true` });
     case "datetime": {
       const t = Date.parse(raw);
       if (Number.isNaN(t)) {
-        throw new FemtoError("bad_request", `"${name}" には ISO 8601 の日時を指定してください (受け取った値: "${raw}")`, {
+        throw new FemtoError("bad_request", `"${name}" must be a date-time in ISO 8601 format (received "${raw}")`, {
           hint: `filter[${name}][gte]=2026-01-01T00:00:00Z`,
         });
       }
@@ -180,8 +180,8 @@ const likeEscape = (s: string) => s.replace(/[\\%_]/g, c => `\\${c}`);
 
 function condition(col: Column, op: Operator, raw: string, name: string, binds: unknown[]): string {
   if (!OPS_BY_KIND[col.kind].includes(op)) {
-    throw new FemtoError("bad_request", `"${name}" には演算子 "${op}" を使えません`, {
-      hint: `"${name}" で使える演算子: ${OPS_BY_KIND[col.kind].join(", ")}`,
+    throw new FemtoError("bad_request", `Operator "${op}" cannot be used with "${name}"`, {
+      hint: `Operators available for "${name}": ${OPS_BY_KIND[col.kind].join(", ")}.`,
     });
   }
   const { expr } = col;
@@ -192,7 +192,7 @@ function condition(col: Column, op: Operator, raw: string, name: string, binds: 
     case "in": {
       const values = csv(raw);
       if (values.length === 0 || values.length > MAX_IN_VALUES) {
-        throw new FemtoError("bad_request", `"${name}" の in には 1〜${MAX_IN_VALUES} 個の値をカンマ区切りで指定してください`, {
+        throw new FemtoError("bad_request", `in for "${name}" needs 1 to ${MAX_IN_VALUES} comma-separated values`, {
           hint: `filter[${name}][in]=a,b,c`,
         });
       }
@@ -219,7 +219,7 @@ function filterClauses(cols: Map<string, Column>, filter: NonNullable<ListParams
     const ops = typeof spec === "string" ? { eq: spec } : spec;
     for (const [op, raw] of Object.entries(ops)) {
       if (!(OPERATORS as readonly string[]).includes(op)) {
-        throw new FemtoError("bad_request", `未知の演算子です: "${op}"`, { hint: `使える演算子: ${OPERATORS.join(", ")}` });
+        throw new FemtoError("bad_request", `Unknown operator: "${op}"`, { hint: `Available operators: ${OPERATORS.join(", ")}.` });
       }
       out.push(condition(col, op as Operator, String(raw), name, binds));
     }
@@ -241,7 +241,7 @@ function orderKeys(cols: Map<string, Column>, sort: string | undefined): OrderKe
     const name = desc ? key.slice(1) : key;
     const col = column(cols, name, "sort");
     if (col.kind === "multi") {
-      throw new FemtoError("bad_request", `"${name}" は複数選択のため sort に使えません`, { hint: usable(cols) });
+      throw new FemtoError("bad_request", `"${name}" is a multi-select field and cannot be used in sort`, { hint: usable(cols) });
     }
     return { expr: col.expr, desc };
   });
@@ -318,7 +318,7 @@ export function buildListQuery(collection: Collection, params: ListParams, role:
   const offset = clampInt(params.offset, 0, 0, Number.MAX_SAFE_INTEGER);
   const requested = params.status ?? "published";
   if (requested !== "draft" && requested !== "published" && requested !== "all") {
-    throw new FemtoError("bad_request", `status が不正です: "${String(requested)}"`, { hint: "status は draft / published / all のいずれかです" });
+    throw new FemtoError("bad_request", `Invalid status: "${String(requested)}"`, { hint: "status must be one of draft, published, all." });
   }
   // Non-admin roles only ever see published entries, whatever they ask for.
   const status = role === "admin" ? requested : "published";
@@ -338,7 +338,7 @@ export function buildListQuery(collection: Collection, params: ListParams, role:
     where.push(cursorClause(keys, cursorValues, dir, binds));
   }
   if (binds.length > MAX_BINDS) {
-    throw new FemtoError("bad_request", "filter の条件が多すぎます", { hint: `値の合計は ${MAX_BINDS - 2} 個までです` });
+    throw new FemtoError("bad_request", "Too many filter conditions", { hint: `The total number of values is limited to ${MAX_BINDS - 2}.` });
   }
 
   const whereSql = where.join(" AND ");

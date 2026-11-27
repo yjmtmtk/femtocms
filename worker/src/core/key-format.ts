@@ -35,12 +35,12 @@ const CONTROL_RE = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/;
 
 /** Returns the trimmed name, or a human-readable problem (shared by createKey and bootstrapSql). */
 export function checkKeyName(name: unknown): { ok: true; name: string } | { ok: false; message: string } {
-  if (typeof name !== "string") return { ok: false, message: "name は文字列で指定してください" };
+  if (typeof name !== "string") return { ok: false, message: "name must be a string" };
   const trimmed = name.trim();
   if (trimmed.length < 1 || trimmed.length > KEY_NAME_MAX) {
-    return { ok: false, message: `name は 1〜${KEY_NAME_MAX} 文字で指定してください` };
+    return { ok: false, message: `name must be 1 to ${KEY_NAME_MAX} characters` };
   }
-  if (CONTROL_RE.test(trimmed)) return { ok: false, message: "name に改行・制御文字は使えません" };
+  if (CONTROL_RE.test(trimmed)) return { ok: false, message: "name cannot contain line breaks or control characters" };
   return { ok: true, name: trimmed };
 }
 

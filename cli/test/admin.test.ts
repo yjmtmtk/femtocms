@@ -42,7 +42,7 @@ afterEach(() => {
 });
 
 describe("login", () => {
-  it("GET /api/keys で確認し、ホスト名由来の名前で保存して current にする", async () => {
+  it("verifies the key with GET /api/keys, saves it under a name taken from the host and makes it current", async () => {
     await run("login", "--url", "https://My-Site.example.com/", "--key", KEY);
     expect(String(fetchMock.mock.calls[0]![0])).toBe("https://my-site.example.com/api/keys");
     expect(loadConfig()).toEqual({
@@ -51,7 +51,7 @@ describe("login", () => {
     });
   });
 
-  it("--name を使え、キー全体は出力せず先頭 16 文字だけ出す", async () => {
+  it("accepts --name and prints only the first 16 characters of the key, never the whole key", async () => {
     await run("login", "--url", "https://cms.test", "--key", KEY, "--name", "prod");
     expect(loadConfig().current).toBe("prod");
     const all = out.join("") + err.join("");
@@ -61,23 +61,23 @@ describe("login", () => {
     expect(all).not.toContain(KEY.slice(0, 20));
   });
 
-  it("--json でも鍵は出さない", async () => {
+  it("does not print the key with --json either", async () => {
     await run("--json", "login", "--url", "https://cms.test", "--key", KEY, "--name", "prod");
     const parsed = JSON.parse(out.join(""));
     expect(parsed).toEqual({ profile: "prod", url: "https://cms.test", keyPrefix: KEY.slice(0, 16) });
   });
 
-  it("検証に失敗したら保存せずエラー終了（キーを出さない）", async () => {
+  it("exits with an error without saving when verification fails (and does not print the key)", async () => {
     fetchMock.mockResolvedValueOnce(
-      Response.json({ error: { code: "forbidden", message: "管理キーが必要です" } }, { status: 403 }),
+      Response.json({ error: { code: "forbidden", message: "An admin key is required" } }, { status: 403 }),
     );
     await expect(run("login", "--url", "https://cms.test", "--key", KEY)).rejects.toThrow("exit 1");
     expect(loadConfig()).toEqual({ profiles: {} });
-    expect(err.join("")).toContain("管理キーが必要です");
+    expect(err.join("")).toContain("An admin key is required");
     expect(err.join("") + out.join("")).not.toContain(KEY);
   });
 
-  it("ホスト名が使えない場合でも名前を作る（localhost:8787 など）", async () => {
+  it("still derives a name when the host cannot be used as is (e.g. localhost:8787)", async () => {
     await run("login", "--url", "http://localhost:8787", "--key", KEY);
     expect(loadConfig().current).toBe("localhost");
   });
@@ -91,23 +91,23 @@ describe("logout", () => {
     });
   });
 
-  it("--name 無しなら current を削除し、current を外す", async () => {
+  it("without --name, removes the current profile and clears current", async () => {
     await run("logout");
     expect(loadConfig()).toEqual({ profiles: { b: { url: "https://b", key: KEY } } });
     expect(out.join("") + err.join("")).not.toContain(KEY);
   });
 
-  it("--name で指定したものを削除し、current はそのまま", async () => {
+  it("removes the profile given with --name and leaves current as it is", async () => {
     await run("logout", "--name", "b");
     expect(loadConfig()).toEqual({ current: "a", profiles: { a: { url: "https://a", key: KEY } } });
   });
 
-  it("未登録の名前はエラー", async () => {
+  it("an unknown name is an error", async () => {
     await expect(run("logout", "--name", "zzz")).rejects.toThrow("exit 2");
     expect(err.join("")).toContain("zzz");
   });
 
-  it("current が無く --name も無ければエラー", async () => {
+  it("is an error when there is no current profile and no --name", async () => {
     saveConfig({ profiles: {} });
     await expect(run("logout")).rejects.toThrow("exit 2");
   });

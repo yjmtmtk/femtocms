@@ -30,15 +30,15 @@ const LEVEL: Record<Role, number> = { public: 0, read: 1, admin: 2 };
 export function requireRole(ctx: Ctx, role: "admin" | "read"): void {
   if (LEVEL[ctx.role] >= LEVEL[role]) return;
   if (ctx.role === "public") {
-    throw new FemtoError("unauthorized", "認証が必要です", { hint: "Authorization: Bearer <APIキー> を指定してください" });
+    throw new FemtoError("unauthorized", "Authentication required", { hint: "Send the header Authorization: Bearer <API key>." });
   }
-  throw new FemtoError("forbidden", `この操作には ${role} 権限が必要です`);
+  throw new FemtoError("forbidden", `This operation requires the ${role} role`);
 }
 
 export function requireConfirm(ctx: Ctx, confirm: string | undefined): void {
   if (confirm !== ctx.siteName) {
-    throw new FemtoError("confirmation_required", "確認が必要な操作です", {
-      hint: `confirm に "${ctx.siteName}" を指定してください`,
+    throw new FemtoError("confirmation_required", "Confirmation required", {
+      hint: `Set confirm to "${ctx.siteName}".`,
     });
   }
 }

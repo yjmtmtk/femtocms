@@ -54,7 +54,7 @@ export class FemtoClient {
     } catch (e) {
       // The message must never include the key: only the URL and the underlying reason.
       const reason = e instanceof Error ? e.message : String(e);
-      throw new Error(`${url.href} に接続できませんでした（${reason}）。URL とネットワークを確認してください`);
+      throw new Error(`Could not connect to ${url.href} (${reason}). Check the URL and your network`);
     }
 
     if (res.status === 204) return undefined as T;

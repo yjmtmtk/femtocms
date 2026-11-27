@@ -42,17 +42,17 @@ export function loadConfig(): ConfigFile {
     text = readFileSync(path, "utf8");
   } catch (e) {
     if ((e as NodeJS.ErrnoException).code === "ENOENT") return { profiles: {} };
-    throw new Error(`設定ファイル ${path} を読めませんでした: ${(e as Error).message}`);
+    throw new Error(`Could not read the config file ${path}: ${(e as Error).message}`);
   }
   let parsed: unknown;
   try {
     parsed = JSON.parse(text);
   } catch {
     // Never echo file contents: they hold API keys.
-    throw new Error(`設定ファイル ${path} が壊れています（JSON として読めません）。修正するか削除して femtocms login をやり直してください`);
+    throw new Error(`The config file ${path} is corrupt (it is not valid JSON). Fix it, or delete it and run femtocms login again`);
   }
   if (!isRecord(parsed) || (parsed.profiles !== undefined && !isRecord(parsed.profiles))) {
-    throw new Error(`設定ファイル ${path} の形式が正しくありません`);
+    throw new Error(`The config file ${path} has an invalid format`);
   }
   const config: ConfigFile = { profiles: (parsed.profiles ?? {}) as Record<string, Profile> };
   if (typeof parsed.current === "string") config.current = parsed.current;
@@ -77,7 +77,7 @@ export function saveConfig(c: ConfigFile): void {
 function lookup(config: ConfigFile, name: string): Profile {
   const profile = Object.hasOwn(config.profiles, name) ? config.profiles[name] : undefined;
   if (!profile) {
-    throw new Error(`プロファイル "${name}" は登録されていません。femtocms login --name ${name} で登録してください`);
+    throw new Error(`The profile "${name}" is not saved. Save it with femtocms login --name ${name}`);
   }
   return profile;
 }
@@ -109,7 +109,7 @@ export function resolveProfile(opts: {
     try {
       parsed = JSON.parse(readFileSync(projectFile, "utf8"));
     } catch {
-      throw new Error(`${projectFile} を JSON として読めませんでした`);
+      throw new Error(`Could not parse ${projectFile} as JSON`);
     }
     if (isRecord(parsed)) {
       if (typeof parsed.profile === "string") {
@@ -119,11 +119,11 @@ export function resolveProfile(opts: {
         return { name: "femtocms.json", profile: { url: parsed.url, key: parsed.key } };
       }
     }
-    throw new Error(`${projectFile} には "profile" か "url" と "key" を書いてください`);
+    throw new Error(`${projectFile} must contain either "profile", or both "url" and "key"`);
   }
 
   const config = loadConfig();
   if (config.current) return { name: config.current, profile: lookup(config, config.current) };
 
-  throw new Error("接続先が設定されていません。femtocms init か femtocms login を実行してください");
+  throw new Error("No site is configured. Run femtocms init or femtocms login");
 }

@@ -19,38 +19,38 @@ afterEach(() => {
 });
 
 describe("configPath / loadConfig / saveConfig", () => {
-  it("XDG_CONFIG_HOME 配下の femtocms/config.json を指す", () => {
+  it("points to femtocms/config.json under XDG_CONFIG_HOME", () => {
     expect(configPath()).toBe(join(tmp, "xdg", "femtocms", "config.json"));
   });
 
-  it("XDG_CONFIG_HOME が無ければ ~/.config を使う", () => {
+  it("uses ~/.config when XDG_CONFIG_HOME is not set", () => {
     delete process.env.XDG_CONFIG_HOME;
     expect(configPath().endsWith(join(".config", "femtocms", "config.json"))).toBe(true);
   });
 
-  it("ファイルが無ければ空の設定を返す", () => {
+  it("returns an empty config when the file does not exist", () => {
     expect(loadConfig()).toEqual({ profiles: {} });
   });
 
-  it("保存して読み戻せる", () => {
+  it("can be saved and read back", () => {
     saveConfig({ current: "a", profiles: { a: { url: "https://a", key: "k" } } });
     expect(loadConfig()).toEqual({ current: "a", profiles: { a: { url: "https://a", key: "k" } } });
   });
 
-  it("設定ファイルは 0600、ディレクトリは 0700 で保存される", () => {
+  it("saves the config file with mode 0600 and the directory with 0700", () => {
     saveConfig({ profiles: { a: { url: "https://a", key: "k" } } });
     expect(statSync(configPath()).mode & 0o777).toBe(0o600);
     expect(statSync(dirname(configPath())).mode & 0o777).toBe(0o700);
   });
 
-  it("上書き保存しても 0600 のままで、一時ファイルを残さない", () => {
+  it("keeps mode 0600 when overwritten and leaves no temporary file", () => {
     saveConfig({ profiles: {} });
     saveConfig({ profiles: { a: { url: "https://a", key: "k" } } });
     expect(statSync(configPath()).mode & 0o777).toBe(0o600);
     expect(readdirSync(dirname(configPath()))).toEqual(["config.json"]);
   });
 
-  it("壊れた JSON は分かるエラーにする（キーは含めない）", () => {
+  it("reports corrupt JSON with a clear error (without including the key)", () => {
     mkdirSync(dirname(configPath()), { recursive: true });
     writeFileSync(configPath(), "{ not json");
     expect(() => loadConfig()).toThrow(/config\.json/);
@@ -60,7 +60,7 @@ describe("configPath / loadConfig / saveConfig", () => {
 describe("resolveProfile", () => {
   const env = {};
 
-  it("環境変数が最優先", () => {
+  it("environment variables take precedence", () => {
     saveConfig({ current: "a", profiles: { a: { url: "https://cfg", key: "cfgkey" } } });
     const r = resolveProfile({
       profile: "a",
@@ -70,13 +70,13 @@ describe("resolveProfile", () => {
     expect(r.profile).toEqual({ url: "https://a", key: "k" });
   });
 
-  it("URL だけでは環境変数と見なさない", () => {
+  it("a URL alone is not treated as environment configuration", () => {
     saveConfig({ current: "a", profiles: { a: { url: "https://cfg", key: "cfgkey" } } });
     const r = resolveProfile({ cwd: tmp, env: { FEMTOCMS_URL: "https://a" } });
     expect(r.name).toBe("a");
   });
 
-  it("--profile は femtocms.json と current より優先される", () => {
+  it("--profile takes precedence over femtocms.json and current", () => {
     saveConfig({
       current: "a",
       profiles: { a: { url: "https://a", key: "ka" }, b: { url: "https://b", key: "kb" } },
@@ -86,11 +86,11 @@ describe("resolveProfile", () => {
     expect(r).toEqual({ name: "b", profile: { url: "https://b", key: "kb" } });
   });
 
-  it("未登録の --profile はエラー", () => {
+  it("an unknown --profile is an error", () => {
     expect(() => resolveProfile({ profile: "nope", cwd: tmp, env })).toThrow(/nope/);
   });
 
-  it("親ディレクトリの femtocms.json の profile を使う", () => {
+  it("uses the profile from a femtocms.json in a parent directory", () => {
     saveConfig({
       current: "a",
       profiles: { a: { url: "https://a", key: "ka" }, b: { url: "https://b", key: "kb" } },
@@ -102,18 +102,18 @@ describe("resolveProfile", () => {
     expect(r).toEqual({ name: "b", profile: { url: "https://b", key: "kb" } });
   });
 
-  it("femtocms.json に url と key を直接書ける", () => {
+  it("femtocms.json can hold url and key directly", () => {
     writeFileSync(join(tmp, "femtocms.json"), JSON.stringify({ url: "https://x", key: "kx" }));
     const r = resolveProfile({ cwd: tmp, env });
     expect(r.profile).toEqual({ url: "https://x", key: "kx" });
   });
 
-  it("femtocms.json が未登録の profile を指すとエラー", () => {
+  it("is an error when femtocms.json points to an unknown profile", () => {
     writeFileSync(join(tmp, "femtocms.json"), JSON.stringify({ profile: "ghost" }));
     expect(() => resolveProfile({ cwd: tmp, env })).toThrow(/ghost/);
   });
 
-  it("current にフォールバックする", () => {
+  it("falls back to current", () => {
     saveConfig({ current: "a", profiles: { a: { url: "https://a", key: "ka" } } });
     expect(resolveProfile({ cwd: tmp, env })).toEqual({
       name: "a",
@@ -121,7 +121,7 @@ describe("resolveProfile", () => {
     });
   });
 
-  it("どれも無ければ init / login を案内するエラー", () => {
+  it("with none of them, errors and points to init / login", () => {
     expect(() => resolveProfile({ cwd: tmp, env })).toThrow(/femtocms init.*femtocms login/);
   });
 });

@@ -18,7 +18,7 @@ function readText(path: string, what: string): string {
   try {
     return readFileSync(path, "utf8");
   } catch (e) {
-    throw new Error(`${what} ${path} を読めませんでした: ${(e as Error).message}`);
+    throw new Error(`Could not read ${what} ${path}: ${(e as Error).message}`);
   }
 }
 
@@ -30,25 +30,25 @@ const FIELD_TYPES: readonly FieldType[] = [
 
 /** A collection definition file: `.json` is JSON, anything else is YAML (which also reads JSON). */
 function readDefinition(path: string): Obj {
-  const text = readText(path, "定義ファイル");
+  const text = readText(path, "definition file");
   let parsed: unknown;
   try {
     parsed = extname(path).toLowerCase() === ".json" ? JSON.parse(text) : parseYaml(text);
   } catch (e) {
-    throw new Error(`${path} を読めませんでした（JSON / YAML の形式が正しくありません）: ${(e as Error).message}`);
+    throw new Error(`Could not read ${path} (it is not valid JSON or YAML): ${(e as Error).message}`);
   }
-  if (!isObject(parsed)) throw new Error(`${path} はコレクション定義のオブジェクトである必要があります`);
+  if (!isObject(parsed)) throw new Error(`${path} must contain a collection definition object`);
   return parsed;
 }
 
 function parseFieldFlag(spec: string): FieldDef {
   const [name, type, flag, ...rest] = spec.split(":");
-  if (!name || !type || rest.length > 0) throw new Error(`--field の書式が不正です: "${spec}"（name:type[:required]）`);
+  if (!name || !type || rest.length > 0) throw new Error(`--field has an invalid format: "${spec}" (expected name:type[:required])`);
   if (!FIELD_TYPES.includes(type as FieldType)) {
-    throw new Error(`--field "${spec}" の型 "${type}" は使えません。使える型: ${FIELD_TYPES.join(", ")}`);
+    throw new Error(`--field "${spec}" has an unknown type "${type}". Available types: ${FIELD_TYPES.join(", ")}`);
   }
   if (flag !== undefined && flag !== "required") {
-    throw new Error(`--field "${spec}" の 3 番目は required のみ指定できます`);
+    throw new Error(`--field "${spec}": the third part can only be "required"`);
   }
   return flag ? { name, type: type as FieldType, required: true } : { name, type: type as FieldType };
 }
@@ -73,7 +73,7 @@ export async function collectionsCreate(client: FemtoClient, opts: CollectionsCr
 }
 
 export async function collectionsUpdate(client: FemtoClient, name: string, opts: { file?: string }): Promise<unknown> {
-  if (!opts.file) throw new Error("--file で更新するコレクション定義（JSON / YAML）を指定してください");
+  if (!opts.file) throw new Error("Pass --file with the collection definition (JSON or YAML) to update with");
   return client.request("PATCH", `/api/collections/${encodeURIComponent(name)}`, { json: readDefinition(opts.file) });
 }
 
@@ -109,7 +109,7 @@ export interface EntryWriteOpts {
 /** `k=v` -> `filter[k]=v`, `k[op]=v` -> `filter[k][op]=v`. */
 function filterQuery(spec: string): [string, string] {
   const m = /^([^[\]=]+)(?:\[([^[\]=]+)\])?=(.*)$/s.exec(spec);
-  if (!m) throw new Error(`--filter の書式が不正です: "${spec}"（k=v または k[op]=v）`);
+  if (!m) throw new Error(`--filter has an invalid format: "${spec}" (expected k=v or k[op]=v)`);
   const [, key, op, value] = m;
   return [op ? `filter[${key}][${op}]` : `filter[${key}]`, value!];
 }
@@ -136,7 +136,7 @@ export async function entriesList(client: FemtoClient, collection: string, opts:
 export async function entriesGet(client: FemtoClient, [collection, id]: [collection: string, id?: string]): Promise<unknown> {
   if (id === undefined) {
     const def = await client.request<Collection>("GET", `/api/collections/${encodeURIComponent(collection)}`);
-    if (def.kind !== "single") throw new Error(`コレクション "${collection}" は複数件の list です。エントリの id か slug を指定してください`);
+    if (def.kind !== "single") throw new Error(`The collection "${collection}" is a list collection. Give the entry id or slug`);
     return client.request("GET", `/api/${encodeURIComponent(collection)}`);
   }
   return client.request("GET", entryPath(collection, id));
@@ -149,15 +149,15 @@ const entryPath = (collection: string, id: string, action = "") =>
 function splitFrontMatter(text: string, path: string): { front: Obj; body: string } {
   if (!/^---\r?\n/.test(text)) return { front: {}, body: text };
   const m = /^---\r?\n(?:([\s\S]*?)\r?\n)?---[ \t]*(?:\r?\n|$)/.exec(text);
-  if (!m) throw new Error(`${path} の front matter が閉じていません（2 つ目の --- がありません）`);
+  if (!m) throw new Error(`The front matter in ${path} is not closed (the second --- is missing)`);
   let front: unknown;
   try {
     front = parseYaml(m[1] ?? "");
   } catch (e) {
-    throw new Error(`${path} の front matter を YAML として読めませんでした: ${(e as Error).message}`);
+    throw new Error(`Could not parse the front matter in ${path} as YAML: ${(e as Error).message}`);
   }
   if (front === null || front === undefined) front = {};
-  if (!isObject(front)) throw new Error(`${path} の front matter は key: value の形（mapping）である必要があります`);
+  if (!isObject(front)) throw new Error(`The front matter in ${path} must be a key: value mapping`);
   return { front, body: text.slice(m[0].length) };
 }
 
@@ -165,18 +165,18 @@ function coerce(field: FieldDef, raw: string): unknown {
   switch (field.type) {
     case "number": {
       const n = Number(raw);
-      if (raw.trim() === "" || Number.isNaN(n)) throw new Error(`--set ${field.name}=${raw}: 数値を指定してください`);
+      if (raw.trim() === "" || Number.isNaN(n)) throw new Error(`--set ${field.name}=${raw}: give a number`);
       return n;
     }
     case "boolean":
       if (raw === "true") return true;
       if (raw === "false") return false;
-      throw new Error(`--set ${field.name}=${raw}: true か false を指定してください`);
+      throw new Error(`--set ${field.name}=${raw}: give true or false`);
     case "json":
       try {
         return JSON.parse(raw);
       } catch {
-        throw new Error(`--set ${field.name}=${raw}: JSON として読めません`);
+        throw new Error(`--set ${field.name}=${raw}: not valid JSON`);
       }
     case "select":
     case "image":
@@ -192,9 +192,9 @@ function parseDataFlag(text: string): Obj {
   try {
     parsed = JSON.parse(text);
   } catch (e) {
-    throw new Error(`--data を JSON として読めませんでした: ${(e as Error).message}`);
+    throw new Error(`Could not parse --data as JSON: ${(e as Error).message}`);
   }
-  if (!isObject(parsed)) throw new Error("--data は JSON オブジェクト（{...}）である必要があります");
+  if (!isObject(parsed)) throw new Error("--data must be a JSON object ({...})");
   return parsed;
 }
 
@@ -211,17 +211,17 @@ async function buildEntryInput(
   const names = () => fields.map((f) => f.name).join(", ");
 
   if (opts.file !== undefined) {
-    const { front, body } = splitFrontMatter(readText(opts.file, "ファイル"), opts.file);
+    const { front, body } = splitFrontMatter(readText(opts.file, "file"), opts.file);
     Object.assign(data, front);
     const text = body.replace(/^(?:\r?\n)+/, "").trimEnd();
     if (text !== "") {
       if (opts.bodyField !== undefined && !fields.some((f) => f.name === opts.bodyField)) {
-        throw new Error(`--body-field "${opts.bodyField}" はコレクション "${collection}" にありません。フィールド: ${names()}`);
+        throw new Error(`--body-field "${opts.bodyField}" is not a field of the collection "${collection}". Fields: ${names()}`);
       }
       const target = opts.bodyField ?? fields.find((f) => f.type === "markdown")?.name;
       if (!target) {
         throw new Error(
-          `コレクション "${collection}" に markdown フィールドが無いため、本文を入れる先がありません（--body-field で指定するか、本文を空にしてください）`,
+          `The collection "${collection}" has no markdown field to put the body in. Pass --body-field, or leave the body empty`,
         );
       }
       data[target] = text;
@@ -230,10 +230,10 @@ async function buildEntryInput(
 
   for (const spec of sets) {
     const i = spec.indexOf("=");
-    if (i <= 0) throw new Error(`--set の書式が不正です: "${spec}"（k=v）`);
+    if (i <= 0) throw new Error(`--set has an invalid format: "${spec}" (expected k=v)`);
     const key = spec.slice(0, i);
     const field = fields.find((f) => f.name === key);
-    if (!field) throw new Error(`--set のフィールド "${key}" はコレクション "${collection}" にありません。フィールド: ${names()}`);
+    if (!field) throw new Error(`--set field "${key}" is not a field of the collection "${collection}". Fields: ${names()}`);
     data[key] = coerce(field, spec.slice(i + 1));
   }
   return { data, slug: opts.slug, kind: def?.kind };
@@ -244,9 +244,9 @@ export async function entriesCreate(client: FemtoClient, collection: string, opt
   const { data, slug, kind } = await buildEntryInput(client, collection, opts, true);
   const publishedAt = opts.publishedAt;
   if (kind === "single") {
-    if (slug !== undefined) throw new Error(`コレクション "${collection}" は single のため --slug は使えません`);
+    if (slug !== undefined) throw new Error(`--slug cannot be used: the collection "${collection}" is a single collection`);
     if (publishedAt !== undefined) {
-      throw new Error(`コレクション "${collection}" は single のため作成時に --published-at は使えません（作成後に entries update <collection> <id> --published-at で設定してください）`);
+      throw new Error(`--published-at cannot be used when creating: the collection "${collection}" is a single collection. Set it after creating with entries update <collection> <id> --published-at`);
     }
     return client.request("PUT", `/api/${encodeURIComponent(collection)}`, {
       json: { data, ...(opts.publish && { status: "published" }) },
@@ -265,7 +265,7 @@ export async function entriesUpdate(client: FemtoClient, [collection, id]: Entry
   const publishedAt = opts.publishedAt;
   const changed = Object.keys(data).length > 0 || slug !== undefined || publishedAt !== undefined;
   if (!changed && !opts.publish) {
-    throw new Error("更新する内容がありません（--data / --set / --file / --slug / --published-at / --publish のいずれかを指定してください）");
+    throw new Error("Nothing to update. Pass one of --data, --set, --file, --slug, --published-at or --publish");
   }
   let result: unknown;
   if (changed) {
@@ -308,7 +308,7 @@ export interface MediaUploadOpts { alt?: string; url?: string; filename?: string
 /** A local file (multipart) or, with --url, a remote file the server downloads (JSON { url }). Exactly one of the two. */
 export async function mediaUpload(client: FemtoClient, path: string | undefined, opts: MediaUploadOpts): Promise<unknown> {
   if ((path === undefined) === (opts.url === undefined)) {
-    throw new Error("アップロードするファイルのパスか --url <url> のどちらか一方を指定してください");
+    throw new Error("Give either the path of a file to upload or --url <url>, not both");
   }
   if (opts.url !== undefined) {
     return client.request("POST", "/api/media", {
@@ -325,7 +325,7 @@ export async function mediaUpload(client: FemtoClient, path: string | undefined,
 }
 
 export async function mediaUpdate(client: FemtoClient, id: string, opts: { alt?: string }): Promise<unknown> {
-  if (opts.alt === undefined) throw new Error("変更する内容がありません（--alt <text> を指定してください）");
+  if (opts.alt === undefined) throw new Error("Nothing to change. Pass --alt <text>");
   return client.request("PATCH", `/api/media/${encodeURIComponent(id)}`, { json: { alt: opts.alt } });
 }
 
@@ -350,7 +350,7 @@ export async function previewCmd(client: FemtoClient, [collection, id]: EntryRef
   if (opts.ttl === undefined) return client.request("POST", entryPath(collection, id, "/preview"));
   const ttl = /^\d+$/.test(opts.ttl) ? Number(opts.ttl) : NaN;
   if (!(Number.isInteger(ttl) && ttl >= 1 && ttl <= MAX_PREVIEW_TTL_SECONDS)) {
-    throw new Error(`--ttl は 1〜${MAX_PREVIEW_TTL_SECONDS} の整数（秒）で指定してください（受け取った値: "${opts.ttl}"）`);
+    throw new Error(`--ttl must be an integer number of seconds from 1 to ${MAX_PREVIEW_TTL_SECONDS} (got: "${opts.ttl}")`);
   }
   return client.request("POST", entryPath(collection, id, "/preview"), { json: { ttlSeconds: ttl } });
 }
@@ -366,13 +366,13 @@ export async function trashRestore(client: FemtoClient, id: string, _opts: objec
 }
 
 export async function trashDelete(client: FemtoClient, id: string, opts: ConfirmOpts): Promise<unknown> {
-  const confirm = await resolveConfirm(opts, `${id} を完全に削除します。元に戻せません。`);
+  const confirm = await resolveConfirm(opts, `This deletes ${id} for good. It cannot be undone.`);
   await client.request("DELETE", `/api/trash/${encodeURIComponent(id)}`, { query: { confirm } });
   return { deleted: id };
 }
 
 export async function trashEmpty(client: FemtoClient, opts: ConfirmOpts): Promise<unknown> {
-  const confirm = await resolveConfirm(opts, "ゴミ箱を空にします。元に戻せません。");
+  const confirm = await resolveConfirm(opts, "This empties the trash for good. It cannot be undone.");
   return client.request("DELETE", "/api/trash", { query: { confirm } });
 }
 
@@ -381,7 +381,7 @@ export async function trashEmpty(client: FemtoClient, opts: ConfirmOpts): Promis
 const str = (v: unknown) => (typeof v === "string" ? v : v === null || v === undefined ? "" : String(v));
 
 function humanList(header: string[], rows: string[][]): string {
-  return rows.length === 0 ? "（なし）" : table([header, ...rows]);
+  return rows.length === 0 ? "(none)" : table([header, ...rows]);
 }
 
 function humanEntries(result: unknown): string {
@@ -391,7 +391,7 @@ function humanEntries(result: unknown): string {
     const title = Object.values(data).find((v) => typeof v === "string");
     return [str(e.id), str(e.slug) || "-", str(e.status), str(e.publishedAt) || "-", str(title)];
   });
-  const footer = typeof result.total === "number" ? `\n全 ${result.total} 件` : "";
+  const footer = typeof result.total === "number" ? `\nTotal: ${result.total}` : "";
   return humanList(["id", "slug", "status", "publishedAt", "title"], rows) + footer;
 }
 
@@ -402,10 +402,10 @@ const items = (r: unknown): Obj[] => (isObject(r) && Array.isArray(r.items) ? (r
 export function registerContent(program: Command): void {
   const out = (cmd: Command, result: unknown, human?: (r: unknown) => string) => print(result, { json: isJson(cmd), human });
 
-  const collections = program.command("collections").description("コレクション（スキーマ）を管理します");
+  const collections = program.command("collections").description("Manage collections (schemas)");
   collections
     .command("list")
-    .description("コレクション一覧")
+    .description("List collections")
     .action(guarded(async (_o: object, cmd: Command) => {
       out(cmd, await collectionsList(clientFor(cmd)), (r) =>
         humanList(["name", "kind", "fields", "label"], items(r).map((c) => [
@@ -414,120 +414,120 @@ export function registerContent(program: Command): void {
     }));
   collections
     .command("get <name>")
-    .description("コレクション定義を表示")
+    .description("Show a collection definition")
     .action(guarded(async (name: string, _o: object, cmd: Command) => {
       out(cmd, await collectionsGet(clientFor(cmd), name));
     }));
   collections
     .command("create")
-    .description("コレクションを作成（--file の定義を、フラグで上書きできます）")
-    .option("--file <path>", "定義ファイル（.json / .yaml / .yml）")
-    .option("--name <name>", "コレクション名")
-    .option("--label <label>", "表示名")
-    .option("--kind <kind>", "list（複数件）か single（1件）")
-    .option("--field <name:type[:required]>", "フィールド（繰り返し指定可。--file の fields を置き換えます）", collect, [])
+    .description("Create a collection (flags override the definition in --file)")
+    .option("--file <path>", "Definition file (.json / .yaml / .yml)")
+    .option("--name <name>", "Collection name")
+    .option("--label <label>", "Display label")
+    .option("--kind <kind>", "list (many entries) or single (one entry)")
+    .option("--field <name:type[:required]>", "Field (repeatable; replaces the fields in --file)", collect, [])
     .action(guarded(async (o: CollectionsCreateOpts, cmd: Command) => {
-      out(cmd, await collectionsCreate(clientFor(cmd), o), (r) => `作成しました: ${str((r as Obj).name)}`);
+      out(cmd, await collectionsCreate(clientFor(cmd), o), (r) => `Created: ${str((r as Obj).name)}`);
     }));
   collections
     .command("update <name>")
-    .description("コレクション定義を更新（--file の内容を PATCH）")
-    .option("--file <path>", "定義ファイル（.json / .yaml / .yml）")
+    .description("Update a collection definition (PATCHes the content of --file)")
+    .option("--file <path>", "Definition file (.json / .yaml / .yml)")
     .action(guarded(async (name: string, o: { file?: string }, cmd: Command) => {
-      out(cmd, await collectionsUpdate(clientFor(cmd), name, o), () => `更新しました: ${name}`);
+      out(cmd, await collectionsUpdate(clientFor(cmd), name, o), () => `Updated: ${name}`);
     }));
   collections
     .command("delete <name>")
-    .description("コレクションをゴミ箱へ移す")
+    .description("Move a collection to the trash")
     .action(guarded(async (name: string, _o: object, cmd: Command) => {
-      out(cmd, await collectionsDelete(clientFor(cmd), name), () => `ゴミ箱へ移しました: ${name}`);
+      out(cmd, await collectionsDelete(clientFor(cmd), name), () => `Moved to the trash: ${name}`);
     }));
 
-  const entries = program.command("entries").description("エントリを管理します");
+  const entries = program.command("entries").description("Manage entries");
   entries
     .command("list <collection>")
-    .description("エントリ一覧（既定は公開済みのみ。下書きは --status draft か all）")
-    .option("--limit <n>", "件数（既定 10、最大 100）")
-    .option("--offset <n>", "開始位置")
-    .option("--sort <keys>", "並び順（例: -publishedAt。カンマ区切り、- で降順）")
-    .option("--filter <k=v>", "絞り込み（k=v または k[op]=v。繰り返し指定可）", collect, [])
-    .option("--fields <a,b>", "返すフィールド")
-    .option("--expand <a,b>", "展開する参照フィールド")
-    .option("--status <status>", "draft | published | all（既定は published。下書きを見るには draft か all）")
-    .option("--after <idOrSlug>", "このエントリより後ろ（この並び順で）だけを返す。--limit 1 なら次の1件")
-    .option("--before <idOrSlug>", "このエントリより前（この並び順で）だけを返す。並びは一覧と同じ向き")
+    .description("List entries (published only by default; use --status draft or all for drafts)")
+    .option("--limit <n>", "Number of items (default 10, max 100)")
+    .option("--offset <n>", "Start position")
+    .option("--sort <keys>", "Sort order (e.g. -publishedAt; comma-separated, a - prefix sorts descending)")
+    .option("--filter <k=v>", "Filter (k=v or k[op]=v; repeatable)", collect, [])
+    .option("--fields <a,b>", "Fields to return")
+    .option("--expand <a,b>", "Reference fields to expand")
+    .option("--status <status>", "draft | published | all (default: published; use draft or all to see drafts)")
+    .option("--after <idOrSlug>", "Return only entries after this one (in this sort order); with --limit 1, the next entry")
+    .option("--before <idOrSlug>", "Return only entries before this one (in this sort order); results keep the same direction as the list")
     .action(guarded(async (c: string, o: EntriesListOpts, cmd: Command) => {
       out(cmd, await entriesList(clientFor(cmd), c, o), humanEntries);
     }));
   entries
     .command("get <collection> [id]")
-    .description("エントリを 1 件取得（id または slug。single コレクションは id 省略可）")
+    .description("Get one entry (by id or slug; the id can be omitted for a single collection)")
     .action(guarded(async (c: string, id: string | undefined, _o: object, cmd: Command) => {
       out(cmd, await entriesGet(clientFor(cmd), [c, id]));
     }));
 
   const writeOptions = (cmd: Command) =>
     cmd
-      .option("--data <json>", "data を JSON オブジェクトで指定")
-      .option("--set <k=v>", "フィールド値（繰り返し指定可。型に合わせて変換）", collect, [])
-      .option("--file <path>", "Markdown ファイル（先頭の YAML front matter を data に、本文を --body-field に入れる）")
-      .option("--body-field <name>", "本文を入れるフィールド（既定: 最初の markdown フィールド）")
+      .option("--data <json>", "Entry data as a JSON object")
+      .option("--set <k=v>", "Field value (repeatable; converted to the field type)", collect, [])
+      .option("--file <path>", "Markdown file (the YAML front matter becomes the data, the body goes to --body-field)")
+      .option("--body-field <name>", "Field that receives the body (default: the first markdown field)")
       .option("--slug <slug>", "slug")
-      .option("--published-at <iso>", "公開日時（ISO 8601、例: 2026-11-26T09:00:00Z）")
-      .option("--publish", "公開する");
-  const written = (verb: string) => (r: unknown) => `${verb}しました: ${str((r as Obj).id)} (${str((r as Obj).status)})`;
+      .option("--published-at <iso>", "Publish date and time (ISO 8601, e.g. 2026-11-26T09:00:00Z)")
+      .option("--publish", "Publish the entry");
+  const written = (verb: string) => (r: unknown) => `${verb}: ${str((r as Obj).id)} (${str((r as Obj).status)})`;
 
-  writeOptions(entries.command("create <collection>").description("エントリを作成（優先順位: --data、--file、--set）")).action(
+  writeOptions(entries.command("create <collection>").description("Create an entry (sources in priority order: --data, --file, --set)")).action(
     guarded(async (c: string, o: EntryWriteOpts, cmd: Command) => {
-      out(cmd, await entriesCreate(clientFor(cmd), c, o), written("作成"));
+      out(cmd, await entriesCreate(clientFor(cmd), c, o), written("Created"));
     }),
   );
-  writeOptions(entries.command("update <collection> <id>").description("エントリを更新（--publish は更新のあとに公開）")).action(
+  writeOptions(entries.command("update <collection> <id>").description("Update an entry (--publish publishes it after the update)")).action(
     guarded(async (c: string, id: string, o: EntryWriteOpts, cmd: Command) => {
-      out(cmd, await entriesUpdate(clientFor(cmd), [c, id], o), written("更新"));
+      out(cmd, await entriesUpdate(clientFor(cmd), [c, id], o), written("Updated"));
     }),
   );
   entries
     .command("delete <collection> <id>")
-    .description("エントリをゴミ箱へ移す")
+    .description("Move an entry to the trash")
     .action(guarded(async (c: string, id: string, o: object, cmd: Command) => {
-      out(cmd, await entriesDelete(clientFor(cmd), [c, id], o), () => `ゴミ箱へ移しました: ${id}`);
+      out(cmd, await entriesDelete(clientFor(cmd), [c, id], o), () => `Moved to the trash: ${id}`);
     }));
   entries
     .command("publish <collection> <id>")
-    .description("エントリを公開する")
+    .description("Publish an entry")
     .action(guarded(async (c: string, id: string, o: object, cmd: Command) => {
-      out(cmd, await entriesPublish(clientFor(cmd), [c, id], o), written("公開"));
+      out(cmd, await entriesPublish(clientFor(cmd), [c, id], o), written("Published"));
     }));
   entries
     .command("unpublish <collection> <id>")
-    .description("エントリを下書きに戻す")
+    .description("Turn an entry back into a draft")
     .action(guarded(async (c: string, id: string, o: object, cmd: Command) => {
-      out(cmd, await entriesUnpublish(clientFor(cmd), [c, id], o), written("下書きに戻"));
+      out(cmd, await entriesUnpublish(clientFor(cmd), [c, id], o), written("Reverted to draft"));
     }));
 
-  const media = program.command("media").description("メディアを管理します");
+  const media = program.command("media").description("Manage media");
   media
     .command("upload [file]")
-    .description("ファイルをアップロード（ローカルのファイルか --url のどちらか一方）")
-    .option("--url <url>", "サーバに取得させる http(s) の URL（ファイルの代わりに）")
-    .option("--alt <text>", "代替テキスト")
-    .option("--filename <name>", "保存するファイル名（省略時はファイル名か URL の末尾）")
+    .description("Upload a file (a local file or --url, not both)")
+    .option("--url <url>", "http(s) URL for the server to download (instead of a file)")
+    .option("--alt <text>", "Alt text")
+    .option("--filename <name>", "File name to store (default: the file name, or the end of the URL)")
     .action(guarded(async (file: string | undefined, o: MediaUploadOpts, cmd: Command) => {
       out(cmd, await mediaUpload(clientFor(cmd), file, o), (r) => `${str((r as Obj).id)}  ${str((r as Obj).url)}`);
     }));
   media
     .command("update <id>")
-    .description("メディアの代替テキストを変える（ファイルと URL はそのまま）")
-    .option("--alt <text>", "新しい代替テキスト（空文字で消す）")
+    .description("Change the alt text of media (the file and URL stay as they are)")
+    .option("--alt <text>", "New alt text (an empty string clears it)")
     .action(guarded(async (id: string, o: { alt?: string }, cmd: Command) => {
-      out(cmd, await mediaUpdate(clientFor(cmd), id, o), () => `更新しました: ${id}`);
+      out(cmd, await mediaUpdate(clientFor(cmd), id, o), () => `Updated: ${id}`);
     }));
   media
     .command("list")
-    .description("メディア一覧")
-    .option("--limit <n>", "件数（既定 10、最大 100）")
-    .option("--offset <n>", "開始位置")
+    .description("List media")
+    .option("--limit <n>", "Number of items (default 10, max 100)")
+    .option("--offset <n>", "Start position")
     .action(guarded(async (o: { limit?: string; offset?: string }, cmd: Command) => {
       out(cmd, await mediaList(clientFor(cmd), o), (r) =>
         humanList(["id", "filename", "mimeType", "size", "alt"], items(r).map((m) => [
@@ -536,45 +536,45 @@ export function registerContent(program: Command): void {
     }));
   media
     .command("delete <id>")
-    .description("メディアをゴミ箱へ移す")
+    .description("Move media to the trash")
     .action(guarded(async (id: string, o: object, cmd: Command) => {
-      out(cmd, await mediaDelete(clientFor(cmd), id, o), () => `ゴミ箱へ移しました: ${id}`);
+      out(cmd, await mediaDelete(clientFor(cmd), id, o), () => `Moved to the trash: ${id}`);
     }));
 
   program
     .command("preview <collection> <id>")
-    .description("下書きの確認用プレビュー URL を出力")
-    .option("--ttl <seconds>", "有効期間（秒、1〜2592000。既定 86400 = 24 時間）")
+    .description("Print a preview URL for a draft")
+    .option("--ttl <seconds>", "Lifetime in seconds (1 to 2592000; default 86400 = 24 hours)")
     .action(guarded(async (c: string, id: string, o: { ttl?: string }, cmd: Command) => {
       out(cmd, await previewCmd(clientFor(cmd), [c, id], o), (r) => str((r as Obj).url));
     }));
 
-  const trash = program.command("trash").description("ゴミ箱を管理します");
+  const trash = program.command("trash").description("Manage the trash");
   trash
     .command("list")
-    .description("ゴミ箱の中身")
+    .description("List what is in the trash")
     .action(guarded(async (_o: object, cmd: Command) => {
       out(cmd, await trashList(clientFor(cmd)), (r) =>
         humanList(["type", "id", "title", "deletedAt"], items(r).map((t) => [str(t.type), str(t.id), str(t.title), str(t.deletedAt)])));
     }));
   trash
     .command("restore <id>")
-    .description("ゴミ箱から戻す")
+    .description("Restore an item from the trash")
     .action(guarded(async (id: string, o: object, cmd: Command) => {
-      out(cmd, await trashRestore(clientFor(cmd), id, o), () => `戻しました: ${id}`);
+      out(cmd, await trashRestore(clientFor(cmd), id, o), () => `Restored: ${id}`);
     }));
   trash
     .command("delete <id>")
-    .description("完全に削除（サイト名の確認が必要）")
-    .option("--confirm <site>", "サイト名（省略時、対話端末なら入力を促します）")
+    .description("Delete for good (requires the site name)")
+    .option("--confirm <site>", "Site name (if omitted, an interactive terminal asks for it)")
     .action(guarded(async (id: string, o: ConfirmOpts, cmd: Command) => {
-      out(cmd, await trashDelete(clientFor(cmd), id, o), () => `完全に削除しました: ${id}`);
+      out(cmd, await trashDelete(clientFor(cmd), id, o), () => `Deleted for good: ${id}`);
     }));
   trash
     .command("empty")
-    .description("ゴミ箱を空にする（サイト名の確認が必要）")
-    .option("--confirm <site>", "サイト名（省略時、対話端末なら入力を促します）")
+    .description("Empty the trash (requires the site name)")
+    .option("--confirm <site>", "Site name (if omitted, an interactive terminal asks for it)")
     .action(guarded(async (o: ConfirmOpts, cmd: Command) => {
-      out(cmd, await trashEmpty(clientFor(cmd), o), (r) => `ゴミ箱を空にしました（${str((r as Obj).deleted)} 件）`);
+      out(cmd, await trashEmpty(clientFor(cmd), o), (r) => `Trash emptied (${str((r as Obj).deleted)} items)`);
     }));
 }

@@ -35,8 +35,8 @@ beforeEach(async () => {
 });
 afterEach(() => vi.restoreAllMocks());
 
-describe("公開 GET のキャッシュヘッダ", () => {
-  it("max-age=60 と弱い ETag、同じ ETag なら 304（本文なし・ヘッダ付き）", async () => {
+describe("cache headers on public GET", () => {
+  it("max-age=60 and a weak ETag; the same ETag gives 304 (no body, headers kept)", async () => {
     await publish("a", "a");
     for (const path of ["/api/news", "/api/news/a", "/api/collections/news"]) {
       const r1 = await call(WORKERS_DEV, "GET", path);
@@ -53,7 +53,7 @@ describe("公開 GET のキャッシュヘッダ", () => {
     }
   });
 
-  it("If-None-Match: 複数タグ・* ・不一致", async () => {
+  it("If-None-Match: multiple tags, *, and a mismatch", async () => {
     await publish("a");
     const etag = (await call(WORKERS_DEV, "GET", "/api/news")).headers.get("etag")!;
     const inm = (v: string) => call(WORKERS_DEV, "GET", "/api/news", { headers: { "If-None-Match": v } });
@@ -64,7 +64,7 @@ describe("公開 GET のキャッシュヘッダ", () => {
     expect(miss.headers.get("etag")).toBe(etag);
   });
 
-  it("内容が変われば ETag も変わる", async () => {
+  it("the ETag changes when the content changes", async () => {
     await publish("a");
     const etag1 = (await call(WORKERS_DEV, "GET", "/api/news")).headers.get("etag");
     await publish("b");
@@ -72,7 +72,7 @@ describe("公開 GET のキャッシュヘッダ", () => {
     expect(etag2).not.toBe(etag1);
   });
 
-  it("キー付きは private, no-store（ETag なし）", async () => {
+  it("requests with a key get private, no-store (no ETag)", async () => {
     await publish("a", "a");
     for (const path of ["/api/news", "/api/news/a", "/api/collections/news"]) {
       for (const base of [WORKERS_DEV, CUSTOM]) {
@@ -84,7 +84,7 @@ describe("公開 GET のキャッシュヘッダ", () => {
     }
   });
 
-  it("?preview= 付きは no-store でキャッシュしない", async () => {
+  it("?preview= gets no-store and is not cached", async () => {
     const e = await json(await admin("POST", "/api/news", { data: { title: "draft" } }));
     const { url } = await json(await admin("POST", `/api/news/${e.id}/preview`, {}));
     const token = new URL(url).pathname.split("/").pop()!;
@@ -99,7 +99,7 @@ describe("公開 GET のキャッシュヘッダ", () => {
     expect(spy).not.toHaveBeenCalled();
   });
 
-  it("エラー応答はキャッシュしない（独自ヘッダのまま）", async () => {
+  it("error responses are not cached (own headers kept)", async () => {
     const res = await call(CUSTOM, "GET", "/api/news/nope");
     expect(res.status).toBe(404);
     expect(res.headers.get("cache-control")).not.toBe("public, max-age=60");
@@ -107,7 +107,7 @@ describe("公開 GET のキャッシュヘッダ", () => {
     expect((await json(res)).error.code).toBe("not_found");
   });
 
-  it("CORS ヘッダは通常・304・キャッシュヒットのどれにも付く", async () => {
+  it("CORS headers are present on normal, 304 and cache-hit responses", async () => {
     await publish("a");
     const origin = { Origin: "https://site.example" };
     const r1 = await call(CUSTOM, "GET", "/api/news", { headers: origin });
@@ -120,8 +120,8 @@ describe("公開 GET のキャッシュヘッダ", () => {
   });
 });
 
-describe("独自ドメインのエッジキャッシュ", () => {
-  it("書き込み後に新しい内容が返る（版番号がキーに入っている）", async () => {
+describe("edge cache on a custom domain", () => {
+  it("new content is returned after a write (the version number is part of the key)", async () => {
     await publish("first");
     const before = await json(await call(CUSTOM, "GET", "/api/news"));
     expect(before.total).toBe(1);
@@ -130,7 +130,7 @@ describe("独自ドメインのエッジキャッシュ", () => {
     expect(after.total).toBe(2);
   });
 
-  it("2 回目はキャッシュから返る（版が同じなら compute しない）、版が上がれば別キー", async () => {
+  it("the second request is served from the cache (no compute while the version is the same); a new version uses a new key", async () => {
     await publish("first", "first");
     const put = vi.spyOn(caches.default, "put");
     const r1 = await call(CUSTOM, "GET", "/api/news/first");
@@ -158,7 +158,7 @@ describe("独自ドメインのエッジキャッシュ", () => {
     expect(new URL((put.mock.calls[1][0] as Request).url).searchParams.get("fcms-v")).not.toBe(keyUrl.searchParams.get("fcms-v"));
   });
 
-  it("キー付きは Cache API を使わない", async () => {
+  it("requests with a key do not use the Cache API", async () => {
     await publish("a");
     const match = vi.spyOn(caches.default, "match");
     const put = vi.spyOn(caches.default, "put");
@@ -167,13 +167,13 @@ describe("独自ドメインのエッジキャッシュ", () => {
     expect(put).not.toHaveBeenCalled();
   });
 
-  it("200 以外は put しない", async () => {
+  it("non-200 responses are not put into the cache", async () => {
     const put = vi.spyOn(caches.default, "put");
     expect((await call(CUSTOM, "GET", "/api/news/missing")).status).toBe(404);
     expect(put).not.toHaveBeenCalled();
   });
 
-  it("workers.dev では caches.default を使わない", async () => {
+  it("caches.default is not used on workers.dev", async () => {
     await publish("a");
     const match = vi.spyOn(caches.default, "match");
     const put = vi.spyOn(caches.default, "put");

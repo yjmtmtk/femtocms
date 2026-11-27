@@ -13,7 +13,7 @@ const enc = new TextEncoder();
 const dec = new TextDecoder("utf-8", { fatal: true, ignoreBOM: false });
 
 const unauthorized = (why: string) =>
-  new FemtoError("unauthorized", `プレビュー URL が無効です (${why})`, { hint: "POST /api/<collection>/<id>/preview で新しい URL を発行してください" });
+  new FemtoError("unauthorized", `Invalid preview URL (${why})`, { hint: "Call POST /api/<collection>/<id>/preview to issue a new URL." });
 
 function b64urlEncode(bytes: Uint8Array): string {
   let bin = "";
@@ -66,22 +66,22 @@ export async function createPreviewUrl(
 /** Any role may call this: the token itself is the credential. Malformed, forged and expired tokens are all `unauthorized`. */
 export async function verifyPreviewToken(ctx: Ctx, token: string): Promise<{ entryId: string }> {
   const parts = token.split(".");
-  if (parts.length !== 2) throw unauthorized("形式");
+  if (parts.length !== 2) throw unauthorized("format");
   const [payloadB64, sigB64] = parts;
   const sig = b64urlDecode(sigB64);
   const payloadBytes = b64urlDecode(payloadB64);
-  if (!sig || !payloadBytes) throw unauthorized("形式");
+  if (!sig || !payloadBytes) throw unauthorized("format");
   // verify() compares in constant time.
-  if (!(await crypto.subtle.verify("HMAC", await hmacKey(ctx, "verify"), sig, enc.encode(payloadB64)))) throw unauthorized("署名");
+  if (!(await crypto.subtle.verify("HMAC", await hmacKey(ctx, "verify"), sig, enc.encode(payloadB64)))) throw unauthorized("signature");
   let payload: string;
   try {
     payload = dec.decode(payloadBytes);
   } catch {
-    throw unauthorized("形式");
+    throw unauthorized("format");
   }
   const m = /^(e_[0-9a-z]{12})\.(\d{1,12})$/.exec(payload);
-  if (!m) throw unauthorized("形式");
-  if (Number(m[2]) <= Math.floor(ctx.now().getTime() / 1000)) throw unauthorized("期限切れ");
+  if (!m) throw unauthorized("format");
+  if (Number(m[2]) <= Math.floor(ctx.now().getTime() / 1000)) throw unauthorized("expired");
   return { entryId: m[1] };
 }
 
@@ -101,7 +101,7 @@ async function collectionOfEntry(ctx: Ctx, entryId: string): Promise<string | nu
 export async function loadPreview(ctx: Ctx, token: string): Promise<{ collection: Collection; entry: ApiEntry }> {
   const { entryId } = await verifyPreviewToken(ctx, token);
   const name = await collectionOfEntry(ctx, entryId);
-  if (!name) throw new FemtoError("not_found", "プレビュー対象の記事が見つかりません", { hint: "記事が削除された可能性があります" });
+  if (!name) throw new FemtoError("not_found", "The entry to preview was not found", { hint: "The entry may have been deleted." });
   // Admin-equivalent visibility, but only for this single entry.
   const adminCtx = createCtx(ctx.env, ctx.origin, "admin");
   const record = await getEntryRecord(adminCtx, name, entryId, { allowDraft: true });

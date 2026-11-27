@@ -10,9 +10,9 @@ export function buildProgram(): Command {
   const program = new Command();
   program
     .name("femtocms")
-    .description("femtocms の CLI")
-    .option("--json", "結果を JSON で出力する")
-    .option("--profile <name>", "使うプロファイル名");
+    .description("femtocms command line interface")
+    .option("--json", "Print the result as JSON")
+    .option("--profile <name>", "Profile to use");
   registerAdmin(program);
   registerContent(program);
   registerDeploy(program);

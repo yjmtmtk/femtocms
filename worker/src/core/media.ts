@@ -56,7 +56,7 @@ export function mimeFromFilename(filename: string): string {
 }
 
 const tooLarge = () =>
-  new FemtoError("payload_too_large", "ファイルが大きすぎます（上限 20MB）", { hint: "20MB 以下のファイルにしてください" });
+  new FemtoError("payload_too_large", "File is too large (limit 20MB)", { hint: "Use a file of 20MB or less." });
 
 async function findRow(ctx: Ctx, id: string): Promise<MediaRow | null> {
   return ctx.db.prepare("SELECT * FROM media WHERE id = ? AND deleted_at IS NULL").bind(id).first<MediaRow>();
@@ -108,7 +108,7 @@ export async function uploadMedia(ctx: Ctx, input: UploadInput, internal?: { id?
   return toRecord((await findRow(ctx, id))!);
 }
 
-const badUrl = (url: string, hint: string) => new FemtoError("bad_request", `URL を取り込めません: ${url}`, { hint });
+const badUrl = (url: string, hint: string) => new FemtoError("bad_request", `Cannot import URL: ${url}`, { hint });
 
 /** Reads at most MAX_MEDIA_BYTES from the body; stops pulling as soon as the cap is exceeded. */
 async function readCapped(res: Response): Promise<Uint8Array> {
@@ -143,21 +143,21 @@ export async function fetchRemoteMedia(rawUrl: string): Promise<{ bytes: Uint8Ar
   try {
     url = new URL(rawUrl);
   } catch {
-    throw badUrl(rawUrl, "http:// または https:// で始まる URL を指定してください");
+    throw badUrl(rawUrl, "Pass a URL that starts with http:// or https://.");
   }
   if (url.protocol !== "http:" && url.protocol !== "https:") {
-    throw badUrl(rawUrl, "http:// または https:// の URL のみ取り込めます");
+    throw badUrl(rawUrl, "Only http:// or https:// URLs can be imported.");
   }
 
   let res: Response;
   try {
     res = await fetch(url.href, { redirect: "follow" });
   } catch (e) {
-    throw badUrl(rawUrl, `取得に失敗しました: ${e instanceof Error ? e.message : String(e)}`);
+    throw badUrl(rawUrl, `Fetching failed: ${e instanceof Error ? e.message : String(e)}`);
   }
   if (!res.ok) {
     await res.body?.cancel();
-    throw badUrl(rawUrl, `取得先が HTTP ${res.status} を返しました`);
+    throw badUrl(rawUrl, `The server returned HTTP ${res.status}`);
   }
   return { bytes: await readCapped(res), contentType: normalizeMime(res.headers.get("content-type")), url };
 }
@@ -187,7 +187,7 @@ export async function uploadMediaBase64(
     b64 = b64.slice(data[0].length);
   }
   const invalid = () =>
-    new FemtoError("bad_request", "base64 が不正です", { hint: "標準の base64（A-Z a-z 0-9 + /）で指定してください" });
+    new FemtoError("bad_request", "Invalid base64", { hint: "Use standard base64 (A-Z a-z 0-9 + /)." });
   // Cheap character check first; atob below is the authority on padding and length (it throws on "AA=", "A==", ...).
   if (!/^[A-Za-z0-9+/]*={0,2}$/.test(b64)) throw invalid();
   if ((b64.length * 3) / 4 > MAX_MEDIA_BYTES + 3) throw tooLarge(); // before decoding, so a huge string is not expanded
@@ -205,7 +205,7 @@ export async function uploadMediaBase64(
 export async function getMediaRecord(ctx: Ctx, id: string): Promise<MediaRecord> {
   requireRole(ctx, "admin");
   const row = await findRow(ctx, id);
-  if (!row) throw new FemtoError("not_found", `メディア "${id}" が見つかりません`, { hint: "list_media で一覧を確認してください" });
+  if (!row) throw new FemtoError("not_found", `Media "${id}" not found`, { hint: "Call list_media to see the existing media." });
   return toRecord(row);
 }
 
@@ -246,7 +246,7 @@ const INLINE_SAFE = /^(image\/(?!svg\+xml$)[^/]+|application\/pdf|video\/[^/]+|a
 const encodeRfc5987 = (s: string) => encodeURIComponent(s.toWellFormed()).replace(/['()*]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`);
 
 const notFound = () =>
-  Response.json({ error: { code: "not_found", message: "メディアが見つかりません" } }, { status: 404 });
+  Response.json({ error: { code: "not_found", message: "Media not found" } }, { status: 404 });
 
 /** Public delivery (no role check). Trashed or missing media is a 404. */
 export async function serveMedia(ctx: Ctx, id: string): Promise<Response> {

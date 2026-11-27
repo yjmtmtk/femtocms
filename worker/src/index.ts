@@ -77,7 +77,7 @@ app.use("/api/*", authMiddleware);
 app.route("/api", api);
 app.route("/mcp", mcpApp);
 
-app.notFound(() => errorResponse(new FemtoError("not_found", "見つかりません", { hint: "GET /api/collections で利用可能なコレクションを確認してください" })));
+app.notFound(() => errorResponse(new FemtoError("not_found", "Not found", { hint: "Call GET /api/collections to see the available collections." })));
 app.onError((err) => errorResponse(err));
 
 export default { fetch: app.fetch };

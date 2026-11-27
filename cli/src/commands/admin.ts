@@ -57,10 +57,10 @@ export async function resolveConfirm(opts: ConfirmOpts, what: string): Promise<s
   if (opts.confirm) return opts.confirm;
   const tty = opts.isTTY ?? process.stdin.isTTY === true;
   if (!tty) {
-    throw new Error("サイト名の確認が必要です: pass --confirm <site>（サイト名は femtocms init の --name。GET / の site で確認できます）");
+    throw new Error("Confirmation required: pass --confirm <site> (the site name is the --name you gave to femtocms init; GET / returns it as \"site\")");
   }
-  const answer = await (opts.prompter ?? clackPrompter)(`${what}\nサイト名を入力してください`);
-  if (!answer) throw new Error("キャンセルしました");
+  const answer = await (opts.prompter ?? clackPrompter)(`${what}\nType the site name to confirm`);
+  if (!answer) throw new Error("Cancelled");
   return answer;
 }
 
@@ -68,7 +68,7 @@ export async function resolveConfirm(opts: ConfirmOpts, what: string): Promise<s
 
 export async function keysCreate(client: FemtoClient, opts: { name: string; role?: string }): Promise<unknown> {
   const role = opts.role ?? "read";
-  if (role !== "admin" && role !== "read") throw new Error(`--role は admin か read です（受け取った値: "${role}"）`);
+  if (role !== "admin" && role !== "read") throw new Error(`--role must be admin or read (got: "${role}")`);
   return client.request("POST", "/api/keys", { json: { name: opts.name, role } });
 }
 
@@ -100,7 +100,7 @@ function timestamp(d = new Date()): string {
 }
 
 export async function resetCmd(client: FemtoClient, opts: ConfirmOpts): Promise<unknown> {
-  const confirm = await resolveConfirm(opts, "すべてのコンテンツ（エントリ・メディア・コレクション）をゴミ箱へ移します。API キーは残ります。");
+  const confirm = await resolveConfirm(opts, "This moves all content (entries, media, collections) to the trash. API keys are kept.");
   return client.request("POST", "/api/reset", { json: { confirm } });
 }
 
@@ -115,8 +115,8 @@ export async function exportCmd(client: FemtoClient, opts: ExportOpts): Promise<
 
   // Media first, data.json last: a half-finished export never looks complete. Media is public, so no auth header.
   for (const m of data.media ?? []) {
-    const fail = (why: string) => new Error(`メディア ${m.id} をダウンロードできませんでした: ${why}`);
-    if (!m.url) throw fail("url がありません");
+    const fail = (why: string) => new Error(`Could not download media ${m.id}: ${why}`);
+    if (!m.url) throw fail("it has no url");
     let res: Response;
     try {
       res = await download(m.url);
@@ -139,7 +139,7 @@ async function assertSiteName(client: FemtoClient, confirm: string): Promise<voi
   const root = await client.request<{ site?: unknown }>("GET", "/");
   if (root?.site !== confirm) {
     throw new Error(
-      `--confirm の値 "${confirm}" がサイト名と一致しません（サイト名は "${String(root?.site)}"。femtocms init の --name で、GET / の site で確認できます）。何も書き込んでいません`,
+      `The --confirm value "${confirm}" does not match the site name ("${String(root?.site)}"; it is the --name you gave femtocms init, and GET / returns it as site). Nothing was written`,
     );
   }
 }
@@ -150,16 +150,16 @@ export async function importCmd(client: FemtoClient, dir: string, opts: ImportOp
   try {
     text = readFileSync(dataPath, "utf8");
   } catch (e) {
-    throw new Error(`${dataPath} を読めませんでした: ${(e as Error).message}`);
+    throw new Error(`Could not read ${dataPath}: ${(e as Error).message}`);
   }
   let data: ExportFile;
   try {
     data = JSON.parse(text) as ExportFile;
   } catch {
-    throw new Error(`${dataPath} を JSON として読めませんでした`);
+    throw new Error(`Could not parse ${dataPath} as JSON`);
   }
   // Ask first: a refusal must happen before any request (media PUTs included).
-  const confirm = opts.replace ? await resolveConfirm(opts, "既存のデータをすべてゴミ箱へ移して置き換えます。") : undefined;
+  const confirm = opts.replace ? await resolveConfirm(opts, "This moves all existing data to the trash and replaces it.") : undefined;
   // The server checks confirm only in POST /api/import, after the media PUTs: check it against GET / first so a typo writes nothing.
   if (confirm !== undefined) await assertSiteName(client, confirm);
 
@@ -185,24 +185,24 @@ export async function importCmd(client: FemtoClient, dir: string, opts: ImportOp
 export function registerAdmin(program: Command): void {
   program
     .command("login")
-    .description("管理キーで接続先を登録します（GET /api/keys で管理キーかどうかを確認してから保存）")
-    .requiredOption("--url <url>", "サイトの URL")
-    .requiredOption("--key <key>", "管理キー（fcms_admin_...）")
-    .option("--name <profile>", "プロファイル名（省略時は URL のホスト名）")
+    .description("Save a site connection using an admin key (the key is checked with GET /api/keys before it is saved)")
+    .requiredOption("--url <url>", "URL of the site")
+    .requiredOption("--key <key>", "Admin key (fcms_admin_...)")
+    .option("--name <profile>", "Profile name (default: the host name of the URL)")
     .action(
       guarded(async (o: { url: string; key: string; name?: string }, cmd: Command) => {
         let parsed: URL;
         try {
           parsed = new URL(o.url);
         } catch {
-          throw new Error(`URL として読めません: ${o.url}`);
+          throw new Error(`Not a valid URL: ${o.url}`);
         }
         if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
-          throw new Error("URL は http:// か https:// で始めてください");
+          throw new Error("The URL must start with http:// or https://");
         }
         const name = o.name ?? profileNameFromUrl(parsed);
         if (!PROFILE_NAME_RE.test(name)) {
-          throw new Error(`プロファイル名 "${name}" は使えません（小文字英数字とハイフン、先頭は英数字）`);
+          throw new Error(`The profile name "${name}" is not allowed. Use lowercase letters, digits and hyphens, starting with a letter or digit`);
         }
         const url = o.url.replace(/\/+$/, "");
 
@@ -218,7 +218,7 @@ export function registerAdmin(program: Command): void {
           { profile: name, url, keyPrefix },
           {
             json: Boolean(cmd.optsWithGlobals().json),
-            human: () => `ログインしました: ${name} (${url}) キー: ${keyPrefix}...`,
+            human: () => `Logged in: ${name} (${url}) key: ${keyPrefix}...`,
           },
         );
       }),
@@ -226,46 +226,46 @@ export function registerAdmin(program: Command): void {
 
   program
     .command("logout")
-    .description("保存済みのプロファイルを削除します")
-    .option("--name <profile>", "削除するプロファイル名（省略時は現在のプロファイル）")
+    .description("Remove a saved profile")
+    .option("--name <profile>", "Profile to remove (default: the current profile)")
     .action(
       guarded(async (o: { name?: string }, cmd: Command) => {
         const config = loadConfig();
         const name = o.name ?? config.current;
-        if (!name) throw new Error("削除するプロファイルがありません。--name で指定してください");
+        if (!name) throw new Error("There is no profile to remove. Pass --name");
         if (!Object.hasOwn(config.profiles, name)) {
-          throw new Error(`プロファイル "${name}" は登録されていません`);
+          throw new Error(`The profile "${name}" is not saved`);
         }
         delete config.profiles[name];
         if (config.current === name) delete config.current;
         saveConfig(config);
         print(
           { removed: name },
-          { json: Boolean(cmd.optsWithGlobals().json), human: () => `ログアウトしました: ${name}` },
+          { json: Boolean(cmd.optsWithGlobals().json), human: () => `Logged out: ${name}` },
         );
       }),
     );
 
-  const keys = program.command("keys").description("API キーを管理します");
+  const keys = program.command("keys").description("Manage API keys");
   keys
     .command("create")
-    .description("API キーを作成（キーは作成時にだけ表示されます）")
-    .requiredOption("--name <name>", "キーの名前")
-    .option("--role <role>", "admin | read（既定は read）")
+    .description("Create an API key (the key is shown only once, when it is created)")
+    .requiredOption("--name <name>", "Name of the key")
+    .option("--role <role>", "admin | read (default: read)")
     .action(
       guarded(async (o: { name: string; role?: string }, cmd: Command) => {
         print(await keysCreate(clientFor(cmd), o), {
           json: isJson(cmd),
           human: (r) => {
             const { key, info } = r as { key: string; info: { id: string; role: string } };
-            return `${key}\nid: ${info.id}  role: ${info.role}\nこのキーはもう表示されません。今のうちに保存してください`;
+            return `${key}\nid: ${info.id}  role: ${info.role}\nThis key will not be shown again. Save it now`;
           },
         });
       }),
     );
   keys
     .command("list")
-    .description("API キー一覧")
+    .description("List API keys")
     .action(
       guarded(async (_o: object, cmd: Command) => {
         print(await keysList(clientFor(cmd)), {
@@ -274,45 +274,45 @@ export function registerAdmin(program: Command): void {
             const rows = ((r as { items: Record<string, string | null>[] }).items).map((k) => [
               k.id!, k.name!, k.role!, k.prefix!, k.revokedAt ? "revoked" : "active",
             ]);
-            return rows.length === 0 ? "（なし）" : table([["id", "name", "role", "prefix", "state"], ...rows]);
+            return rows.length === 0 ? "(none)" : table([["id", "name", "role", "prefix", "state"], ...rows]);
           },
         });
       }),
     );
   keys
     .command("revoke <id>")
-    .description("API キーを無効にする（最後の有効な管理キーは無効にできません）")
+    .description("Revoke an API key (the last active admin key cannot be revoked)")
     .action(
       guarded(async (id: string, o: object, cmd: Command) => {
-        print(await keysRevoke(clientFor(cmd), id, o), { json: isJson(cmd), human: () => `無効にしました: ${id}` });
+        print(await keysRevoke(clientFor(cmd), id, o), { json: isJson(cmd), human: () => `Revoked: ${id}` });
       }),
     );
 
   program
     .command("reset")
-    .description("すべてのコンテンツ（エントリ・メディア・コレクション）をゴミ箱へ移します。完全には消えません（サイト名の確認が必要）")
-    .option("--confirm <site>", "サイト名（省略時、対話端末なら入力を促します）")
+    .description("Move all content (entries, media, collections) to the trash; nothing is deleted for good (requires the site name)")
+    .option("--confirm <site>", "Site name (if omitted, an interactive terminal asks for it)")
     .action(
       guarded(async (o: ConfirmOpts, cmd: Command) => {
         print(await resetCmd(clientFor(cmd), o), {
           json: isJson(cmd),
           human: (r) =>
-            `ゴミ箱へ移しました（${(r as { trashed: number }).trashed} 件）。完全に削除するには femtocms trash empty --confirm <site> を実行してください`,
+            `Moved to the trash (${(r as { trashed: number }).trashed} items). To delete for good, run femtocms trash empty --confirm <site>`,
         });
       }),
     );
 
   program
     .command("export")
-    .description("data.json と media/ をフォルダに書き出す")
-    .option("--out <dir>", "出力先（既定: ./femtocms-export-YYYYMMDD-HHmmss）")
+    .description("Write data.json and media/ to a folder")
+    .option("--out <dir>", "Output folder (default: ./femtocms-export-YYYYMMDD-HHmmss)")
     .action(
       guarded(async (o: { out?: string }, cmd: Command) => {
         print(await exportCmd(clientFor(cmd), o), {
           json: isJson(cmd),
           human: (r) => {
             const x = r as { dir: string; collections: number; entries: number; media: number };
-            return `${x.dir} に書き出しました（コレクション ${x.collections}、エントリ ${x.entries}、メディア ${x.media}）`;
+            return `Exported to ${x.dir} (collections ${x.collections}, entries ${x.entries}, media ${x.media})`;
           },
         });
       }),
@@ -321,18 +321,18 @@ export function registerAdmin(program: Command): void {
   program
     .command("import <dir>")
     .description(
-      "export のフォルダから取り込む。media/ のファイルは、マージでも取り込みデータの検証より先に PUT /api/media/<id> で送ります" +
-        "（検証で失敗するとファイルだけが残りますが、同じ id で再実行すれば上書きされます）",
+      "Import from a folder written by export. Files in media/ are sent with PUT /api/media/<id> before the data is validated, even when merging" +
+        " (if validation fails, only the files stay behind; running the import again overwrites them under the same ids)",
     )
-    .option("--replace", "既存のデータをゴミ箱へ移して置き換える（サイト名の確認が必要）")
-    .option("--confirm <site>", "--replace のためのサイト名（省略時、対話端末なら入力を促します）")
+    .option("--replace", "Move existing data to the trash and replace it (requires the site name)")
+    .option("--confirm <site>", "Site name for --replace (if omitted, an interactive terminal asks for it)")
     .action(
       guarded(async (dir: string, o: ImportOpts, cmd: Command) => {
         print(await importCmd(clientFor(cmd), dir, o), {
           json: isJson(cmd),
           human: (r) => {
             const x = r as { collections: number; entries: number; media: number };
-            return `取り込みました（コレクション ${x.collections}、エントリ ${x.entries}、メディア ${x.media}）`;
+            return `Imported (collections ${x.collections}, entries ${x.entries}, media ${x.media})`;
           },
         });
       }),

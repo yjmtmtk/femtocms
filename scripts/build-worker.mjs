@@ -33,7 +33,7 @@ const build = spawnSync(
 );
 if (build.status !== 0 || !existsSync(entry)) {
   process.stderr.write(`${build.stdout}\n${build.stderr}\n`);
-  fail(`wrangler の dry-run が失敗しました（終了コード ${build.status}）`);
+  fail(`wrangler dry-run failed (exit code ${build.status})`);
 }
 
 // import EMBED from "./<hash>-embed.client.js";  ->  const EMBED = "<minified file contents>";
@@ -50,9 +50,9 @@ writeFileSync(entry, code);
 
 // Self-check: the embed script is in the bundle as a string and nothing still imports a sibling file.
 const embedSource = minifyEmbed(readFileSync(join(root, "worker", "src", "public", "embed.client.js"), "utf8"));
-if (!code.includes(JSON.stringify(embedSource))) fail("dist/worker/index.js に embed.client.js（圧縮後）の中身が埋め込まれていません");
-if (/from\s+"\.\/[^"]*\.client\.js"/.test(code)) fail("dist/worker/index.js が .client.js を import したままです");
+if (!code.includes(JSON.stringify(embedSource))) fail("dist/worker/index.js does not contain the contents of embed.client.js (minified)");
+if (/from\s+"\.\/[^"]*\.client\.js"/.test(code)) fail("dist/worker/index.js still imports a .client.js file");
 const leftovers = readdirSync(outdir).filter((f) => f.endsWith(".client.js"));
-if (leftovers.length > 0) fail(`余分なモジュールが残っています: ${leftovers.join(", ")}`);
+if (leftovers.length > 0) fail(`Unexpected modules left in the bundle: ${leftovers.join(", ")}`);
 
 console.log(`build-worker: dist/worker/index.js (${(code.length / 1024).toFixed(0)} KiB, ${inlined.length} text module(s) inlined, embed.js ${(embedSource.length / 1024).toFixed(1)} KiB)`);

@@ -37,7 +37,7 @@ const ENTRY_SELECT =
   "FROM entries e JOIN collections c ON c.id = e.collection_id";
 
 const notInTrash = (id: string) =>
-  new FemtoError("not_found", `"${id}" がゴミ箱に見つかりません`, { hint: "list_trash でゴミ箱の中身を確認してください" });
+  new FemtoError("not_found", `"${id}" not found in the trash`, { hint: "Call list_trash to see what is in the trash." });
 
 export async function trashEntry(ctx: Ctx, collection: string, idOrSlug: string): Promise<void> {
   requireRole(ctx, "admin");
@@ -46,8 +46,8 @@ export async function trashEntry(ctx: Ctx, collection: string, idOrSlug: string)
     .prepare("SELECT id FROM entries WHERE collection_id = ? AND deleted_at IS NULL AND (id = ? OR slug = ?)")
     .bind(c.id, idOrSlug, idOrSlug).first<{ id: string }>();
   if (!row) {
-    throw new FemtoError("not_found", `エントリ "${idOrSlug}" がコレクション "${collection}" に見つかりません`, {
-      hint: "list_entries で一覧を確認してください",
+    throw new FemtoError("not_found", `Entry "${idOrSlug}" not found in collection "${collection}"`, {
+      hint: "Call list_entries to see the existing entries.",
     });
   }
   await ctx.db.prepare("UPDATE entries SET deleted_at = ? WHERE id = ?").bind(ctx.now().toISOString(), row.id).run();
@@ -60,7 +60,7 @@ export async function trashMedia(ctx: Ctx, id: string): Promise<void> {
     .prepare("UPDATE media SET deleted_at = ? WHERE id = ? AND deleted_at IS NULL")
     .bind(ctx.now().toISOString(), id).run();
   if (res.meta.changes === 0) {
-    throw new FemtoError("not_found", `メディア "${id}" が見つかりません`, { hint: "list_media で一覧を確認してください" });
+    throw new FemtoError("not_found", `Media "${id}" not found`, { hint: "Call list_media to see the existing media." });
   }
   await bumpVersion(ctx);
 }
@@ -115,8 +115,8 @@ function kindOf(id: string): Kind {
   if (id.startsWith("e_")) return "entry";
   if (id.startsWith("m_")) return "media";
   if (id.startsWith("c_")) return "collection";
-  throw new FemtoError("bad_request", `id "${id}" の種類が分かりません`, {
-    hint: "エントリは e_、メディアは m_、コレクションは c_ で始まる id を指定してください",
+  throw new FemtoError("bad_request", `Cannot tell what kind of item id "${id}" is`, {
+    hint: "Pass an id that starts with e_ (entry), m_ (media) or c_ (collection).",
   });
 }
 
@@ -142,13 +142,13 @@ export async function restoreFromTrash(ctx: Ctx, id: string): Promise<TrashItem>
   if (kind === "entry") {
     const e = found.entry!;
     if (e.c_deleted) {
-      throw new FemtoError("conflict", `親のコレクション "${e.cname}" がゴミ箱にあります`, {
-        hint: `先にコレクション ${e.cname} を復元してください`,
+      throw new FemtoError("conflict", `Parent collection "${e.cname}" is in the trash`, {
+        hint: `Restore collection ${e.cname} first.`,
       });
     }
     if (e.ckind === "single" && await ctx.db.prepare("SELECT 1 AS x FROM entries WHERE collection_id = ? AND deleted_at IS NULL").bind(e.collection_id).first()) {
-      throw new FemtoError("conflict", `single コレクション "${e.cname}" には既に別のエントリがあります`, {
-        hint: "今のエントリをゴミ箱へ移してから復元してください",
+      throw new FemtoError("conflict", `Single collection "${e.cname}" already has another entry`, {
+        hint: "Move the current entry to the trash, then restore this one.",
       });
     }
     await ctx.db.prepare("UPDATE entries SET deleted_at = NULL, trashed_with = NULL WHERE id = ?").bind(id).run();
@@ -176,7 +176,7 @@ export async function deletePermanently(ctx: Ctx, id: string, confirm: string | 
   const found = await findItem(ctx, kind, id);
   if (!found) throw notInTrash(id);
   if (!found.trashed) {
-    throw new FemtoError("bad_request", `"${id}" はゴミ箱にありません`, { hint: "先に削除してゴミ箱へ移してください" });
+    throw new FemtoError("bad_request", `"${id}" is not in the trash`, { hint: "Delete it first so that it moves to the trash." });
   }
   requireConfirm(ctx, confirm);
 

@@ -14,6 +14,14 @@
   ],
   "type": "module",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/yjmtmtk/femtocms.git"
+  },
+  "homepage": "https://github.com/yjmtmtk/femtocms#readme",
+  "bugs": {
+    "url": "https://github.com/yjmtmtk/femtocms/issues"
+  },
   "bin": {
     "femtocms": "dist/cli/index.js"
   },

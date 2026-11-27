@@ -6,3 +6,6 @@ coverage
 
 # Playwright MCP の作業ファイル（スクリーンショットなど）
 .playwright-mcp/
+
+# 手元のお試し環境（デモページ・ローカル開発用のキー）。公開しない
+.local/
